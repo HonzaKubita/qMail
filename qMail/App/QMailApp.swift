@@ -4,59 +4,37 @@ import SwiftUI
 @main
 struct QMailApp: App {
     @State private var store = MailStore()
+    @State private var navigator = AppNavigator()
 
     var body: some Scene {
-        WindowGroup("qMail", id: "main") {
+        Window("qMail", id: "main") {
             RootView()
                 .environment(store)
+                .environment(navigator)
                 .task { await store.start() }
         }
-        .defaultSize(width: 1240, height: 780)
-        .commands { MailCommands(store: store) }
-
-        WindowGroup("New Message", id: "compose", for: ComposeRequest.self) { $request in
-            ComposeView(request: request ?? ComposeRequest())
-                .environment(store)
-        }
-        .defaultSize(width: 680, height: 580)
-        .restorationBehavior(.disabled)
+        .defaultSize(width: 1480, height: 900)
+        .commands { MailCommands(store: store, navigator: navigator) }
 
         Settings {
             SettingsView()
                 .environment(store)
+                .environment(navigator)
         }
     }
 }
 
-/// Identifies what a compose window should be prefilled with.
-struct ComposeRequest: Codable, Hashable {
-    enum Mode: String, Codable {
-        case new, reply, replyAll, forward
-    }
-
-    var id = UUID()
-    var mode: Mode = .new
-    /// Summary ID of the message being replied to or forwarded.
-    var messageID: String?
-    var accountID: UUID?
-    var to: [String] = []
-    var subject = ""
-}
-
 struct MailCommands: Commands {
     let store: MailStore
-    @Environment(\.openWindow) private var openWindow
+    let navigator: AppNavigator
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Message") {
-                openWindow(id: "compose", value: ComposeRequest())
+                navigator.startNewMessage(accountID: navigator.accountID ?? store.accounts.first?.id)
             }
             .keyboardShortcut("n")
-            Button("New Viewer Window") {
-                openWindow(id: "main")
-            }
-            .keyboardShortcut("n", modifiers: [.command, .option])
+            .disabled(store.accounts.isEmpty)
         }
         CommandMenu("Mailbox") {
             Button("Get New Mail") {

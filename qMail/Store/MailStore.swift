@@ -4,9 +4,19 @@ import MailCore
 import Observation
 
 enum SidebarItem: Hashable, Codable {
-    case chats
-    case allInboxes
+    case chat(String)
     case mailbox(String)
+    case newMessage
+}
+
+/// A workspace's chats grouped the way the sidebar shows them.
+struct ChatSections {
+    var starred: [Chat] = []
+    var groups: [Chat] = []
+    var direct: [Chat] = []
+    var updates: [Chat] = []
+
+    var isEmpty: Bool { starred.isEmpty && groups.isEmpty && direct.isEmpty && updates.isEmpty }
 }
 
 /// What a chat bubble shows for one message.
@@ -32,6 +42,8 @@ final class MailStore {
     private(set) var knownContacts: [MailAddress] = []
     private(set) var syncingAccounts: Set<UUID> = []
     private(set) var accountErrors: [UUID: String] = [:]
+    /// OAuth accounts whose sign-in expired or was revoked.
+    private(set) var accountsNeedingSignIn: Set<UUID> = []
     private(set) var folderStates: [String: FolderState] = [:]
     var chatPreferences = ChatPreferences.load() {
         didSet { chatPreferences.save() }
@@ -127,31 +139,30 @@ final class MailStore {
 
     func messages(for item: SidebarItem) -> [MessageSummary] {
         switch item {
-        case .chats:
-            return []
-        case .allInboxes:
-            return accounts
-                .compactMap { mailbox(role: .inbox, accountID: $0.id) }
-                .flatMap { messages[$0.id] ?? [] }
-                .sorted { $0.date > $1.date }
-        case .mailbox(let id):
-            return messages[id] ?? []
+        case .chat, .newMessage: []
+        case .mailbox(let id): messages[id] ?? []
         }
     }
 
     func title(for item: SidebarItem) -> String {
         switch item {
-        case .chats: "Chats"
-        case .allInboxes: "All Inboxes"
+        case .chat(let id): chat(id: id).map { title(for: $0) } ?? "Chat"
         case .mailbox(let id): mailbox(id: id)?.displayName ?? "Mailbox"
+        case .newMessage: "New Message"
         }
     }
 
     func unreadCount(for item: SidebarItem) -> Int {
         switch item {
-        case .chats: visibleChats.reduce(0) { $0 + $1.unreadCount }
-        default: messages(for: item).reduce(0) { $0 + ($1.isSeen ? 0 : 1) }
+        case .chat(let id): chat(id: id)?.unreadCount ?? 0
+        case .mailbox: messages(for: item).reduce(0) { $0 + ($1.isSeen ? 0 : 1) }
+        case .newMessage: 0
         }
+    }
+
+    /// Unread messages from people (not newsletters) in a workspace, for the account rail and Dock.
+    func unreadCount(forAccount accountID: UUID) -> Int {
+        visibleChats(for: accountID).filter { !$0.isAutomated }.reduce(0) { $0 + $1.unreadCount }
     }
 
     func canLoadOlder(in mailboxID: String) -> Bool {
@@ -162,9 +173,9 @@ final class MailStore {
 
     // MARK: - Chats
 
-    var visibleChats: [Chat] {
+    func visibleChats(for accountID: UUID) -> [Chat] {
         chats
-            .filter { !chatPreferences.hidden.contains($0.id) }
+            .filter { $0.accountID == accountID && !chatPreferences.hidden.contains($0.id) }
             .sorted { lhs, rhs in
                 let lp = chatPreferences.pinned.contains(lhs.id), rp = chatPreferences.pinned.contains(rhs.id)
                 if lp != rp { return lp }
@@ -174,8 +185,69 @@ final class MailStore {
 
     func chat(id: String) -> Chat? { chats.first { $0.id == id } }
 
+    /// The chat and thread a message lives in. Copies of a message in other folders match by
+    /// Message-ID; mail you sent to several people may be in several chats, so the first wins.
+    func chatAndThread(containing summary: MessageSummary) -> (Chat, ChatThread)? {
+        for chat in chats where chat.accountID == summary.accountID {
+            if let thread = chat.threads.first(where: { thread in
+                thread.messageIDs.contains { id in
+                    id == summary.id || (summary.messageID != nil && summaryIndex[id]?.messageID == summary.messageID)
+                }
+            }) {
+                return (chat, thread)
+            }
+        }
+        return nil
+    }
+
+    /// The chat for exactly these people in an account, if there is one.
+    func chat(accountID: UUID, with people: [MailAddress]) -> Chat? {
+        let mine = ownAddresses[accountID] ?? []
+        let wanted = Set(people.map(\.normalizedEmail).filter { !mine.contains($0) })
+        return chats.first { $0.accountID == accountID && Set($0.participants.map(\.normalizedEmail)) == wanted }
+    }
+
+    /// Everyone on a message except you.
+    func audience(of summary: MessageSummary) -> [MailAddress] {
+        let mine = ownAddresses[summary.accountID] ?? []
+        var seen = Set<String>()
+        return (summary.from + summary.to + summary.cc).filter { address in
+            !mine.contains(address.normalizedEmail) && seen.insert(address.normalizedEmail).inserted
+        }
+    }
+
+    func chatSections(for accountID: UUID, matching query: String = "") -> ChatSections {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        var sections = ChatSections()
+        for chat in visibleChats(for: accountID) where query.isEmpty || matches(chat, query) {
+            if chatPreferences.pinned.contains(chat.id) {
+                sections.starred.append(chat)
+            } else if chat.isAutomated {
+                sections.updates.append(chat)
+            } else if chat.isGroup {
+                sections.groups.append(chat)
+            } else {
+                sections.direct.append(chat)
+            }
+        }
+        return sections
+    }
+
+    private func matches(_ chat: Chat, _ query: String) -> Bool {
+        title(for: chat).localizedCaseInsensitiveContains(query)
+            || chat.subjects.contains { $0.localizedCaseInsensitiveContains(query) }
+            || chat.participants.contains {
+                $0.displayName.localizedCaseInsensitiveContains(query) || $0.email.localizedCaseInsensitiveContains(query)
+            }
+            || chat.messageIDs.contains { id in
+                (chatContents[id]?.text ?? summaryIndex[id]?.snippet ?? "").localizedCaseInsensitiveContains(query)
+            }
+    }
+
     func title(for chat: Chat) -> String {
-        chatPreferences.names[chat.id].flatMap { $0.isEmpty ? nil : $0 } ?? chat.defaultTitle
+        if let custom = chatPreferences.names[chat.id], !custom.isEmpty { return custom }
+        if chat.isSelf { return "\(account(chat.accountID)?.displayName ?? "Me") (you)" }
+        return chat.defaultTitle
     }
 
     func rename(_ chat: Chat, to name: String) {
@@ -232,11 +304,7 @@ final class MailStore {
         sources.append(contentsOf: pendingSent)
 
         ownAddresses = own
-        let options = ChatBuilder.Options(
-            includeAutomated: settings.chatsIncludeAutomated,
-            requireOwnMessage: settings.chatsRequireOwnMessage
-        )
-        chats = ChatBuilder.build(messages: sources, ownAddresses: own, options: options)
+        chats = ChatBuilder.build(messages: sources, ownAddresses: own)
         rebuildContacts()
         updateDockBadge()
     }
@@ -256,9 +324,14 @@ final class MailStore {
         knownContacts = counts.values.sorted { $0.count > $1.count }.prefix(1000).map(\.address)
     }
 
-    /// Loads (and caches) the cleaned-up text of the latest messages in a chat.
-    func loadChatContents(for chat: Chat, limit: Int = 60) async {
-        let summaries = chat.messageIDs.suffix(limit)
+    /// Loads the cleaned-up text of the most recent threads in a chat.
+    func loadChatContents(for chat: Chat, threadLimit: Int = 40) async {
+        await loadContents(for: chat.threads.suffix(threadLimit).flatMap(\.messageIDs))
+    }
+
+    /// Loads (and caches) the cleaned-up text of messages, fetching bodies that aren't on disk yet.
+    func loadContents(for messageIDs: [String]) async {
+        let summaries = messageIDs
             .filter { chatContents[$0] == nil }
             .compactMap { summaryIndex[$0] }
             .filter { !isPending($0) }
@@ -311,22 +384,14 @@ final class MailStore {
         setRead(unread, read: true)
     }
 
-    /// Replies to the latest message of a thread within a chat (or starts a new subject).
-    func sendChatMessage(in chat: Chat, text: String, threadSubject: String?, newSubject: String?,
-                         attachments: [OutgoingAttachment]) async throws {
-        guard let account = account(chat.accountID) else { return }
-        let summaries = chat.messageIDs.compactMap { summaryIndex[$0] }
-        var target: MessageSummary?
-        if newSubject == nil {
-            target = summaries.last { threadSubject == nil || $0.normalizedSubject == threadSubject }
-                ?? summaries.last
-        }
-        let subject: String
-        if let target {
-            subject = ReplyBuilder.replySubject(target.subject)
-        } else {
-            subject = newSubject ?? ""
-        }
+    /// Posts to a chat: a reply inside `thread`, or a new email (a new thread) when `thread` is nil.
+    /// `recipients` overrides who gets it, e.g. replying to everyone from a 1:1 chat.
+    /// Returns the ID of the sent message as it appears in chats until the server copy arrives.
+    @discardableResult
+    func post(in chat: Chat, thread: ChatThread?, text: String, subject: String?, attachments: [OutgoingAttachment],
+              recipients: [MailAddress]? = nil) async throws -> String? {
+        guard let account = account(chat.accountID) else { return nil }
+        let target = thread.flatMap { $0.messageIDs.last }.flatMap { summaryIndex[$0] }
         var references: [String] = []
         if let target {
             references = target.references
@@ -335,14 +400,23 @@ final class MailStore {
         }
         let outgoing = OutgoingMessage(
             from: account.address,
-            to: chat.participants,
-            subject: subject,
+            to: recipients ?? (chat.isSelf ? [account.address] : chat.participants),
+            subject: target.map { ReplyBuilder.replySubject($0.subject) } ?? Self.subject(subject, fallback: text),
             body: text,
             inReplyTo: target?.messageID,
             references: Array(references.suffix(20)),
             attachments: attachments
         )
-        try await send(outgoing, account: account, replyingTo: target)
+        return try await send(outgoing, account: account, replyingTo: target)
+    }
+
+    /// A new message without a subject uses its first line, the way chat messages become emails.
+    static func subject(_ subject: String?, fallback text: String) -> String {
+        if let subject = subject?.trimmingCharacters(in: .whitespaces), !subject.isEmpty { return subject }
+        let firstLine = text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard firstLine.count > 60 else { return firstLine }
+        let cut = firstLine.prefix(60)
+        return (cut.lastIndex(of: " ").map { String(cut[..<$0]) } ?? String(cut)) + "…"
     }
 
     // MARK: - Sync
@@ -373,9 +447,11 @@ final class MailStore {
                 try await syncFolder(mailbox, account: account, client: client)
             }
             accountErrors[accountID] = nil
+            accountsNeedingSignIn.remove(accountID)
             startIdle(for: account)
         } catch {
             accountErrors[accountID] = error.localizedDescription
+            if Self.requiresSignIn(error, account: account) { accountsNeedingSignIn.insert(accountID) }
         }
         rebuildChats()
         scheduleSave(accountID)
@@ -385,8 +461,7 @@ final class MailStore {
     func refreshIfStale(_ item: SidebarItem) async {
         let targets: [Mailbox]
         switch item {
-        case .chats: return
-        case .allInboxes: targets = accounts.compactMap { mailbox(role: .inbox, accountID: $0.id) }
+        case .chat, .newMessage: return
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         for mailbox in targets {
@@ -490,8 +565,7 @@ final class MailStore {
     func searchOnServer(_ item: SidebarItem, query: String) async -> [MessageSummary] {
         let targets: [Mailbox]
         switch item {
-        case .chats: return []
-        case .allInboxes: targets = accounts.compactMap { mailbox(role: .inbox, accountID: $0.id) }
+        case .chat, .newMessage: return []
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         var results: [MessageSummary] = []
@@ -645,7 +719,8 @@ final class MailStore {
 
     // MARK: - Sending
 
-    func send(_ message: OutgoingMessage, account: Account, replyingTo original: MessageSummary?) async throws {
+    @discardableResult
+    func send(_ message: OutgoingMessage, account: Account, replyingTo original: MessageSummary?) async throws -> String {
         let (data, messageID) = message.render()
         let smtp = SMTPClient(endpoint: account.smtp, authProvider: authProvider(for: account))
         try await smtp.send(data, from: message.from.email, to: message.envelopeRecipients)
@@ -689,12 +764,16 @@ final class MailStore {
                 self.scheduleSave(account.id)
             }
         }
+        return pending.id
     }
 
     // MARK: - Accounts
 
     /// Connects to both servers with the given credentials. Throws a user-facing error on failure.
     func verify(_ account: Account, secret: AccountSecret) async throws {
+        if accounts.contains(where: { $0.email.caseInsensitiveCompare(account.email) == .orderedSame }) {
+            throw MailError.invalidConfiguration("\(account.email) is already added.")
+        }
         try await credentials.save(secret, for: account.id)
         let provider = authProvider(for: account)
         let imap = IMAPClient(endpoint: account.imap, authProvider: provider)
@@ -710,6 +789,28 @@ final class MailStore {
         } catch {
             await credentials.delete(accountID: account.id)
             throw Self.describe(error, server: "outgoing mail (SMTP)")
+        }
+    }
+
+    /// Stores fresh tokens after the user signed in again, then reconnects.
+    func updateSignIn(for accountID: UUID, tokens: OAuthTokens) async throws {
+        guard let account = account(accountID) else { return }
+        if let email = tokens.email, email.caseInsensitiveCompare(account.email) != .orderedSame {
+            throw MailError.oauth("You signed in as \(email), but this account is \(account.email).")
+        }
+        try await credentials.save(.oauth(tokens), for: accountID)
+        accountsNeedingSignIn.remove(accountID)
+        accountErrors[accountID] = nil
+        dropClients(for: accountID)
+        Task { await sync(accountID: accountID) }
+    }
+
+    private static func requiresSignIn(_ error: Error, account: Account) -> Bool {
+        guard let mailError = error as? MailError else { return false }
+        switch mailError {
+        case .signInRequired: return true
+        case .authenticationFailed: return account.authKind == .oauth
+        default: return false
         }
     }
 
@@ -746,6 +847,7 @@ final class MailStore {
         }
         mailboxes[accountID] = nil
         accountErrors[accountID] = nil
+        accountsNeedingSignIn.remove(accountID)
         Task {
             await credentials.delete(accountID: accountID)
             await Task.detached { Persistence.deleteData(for: accountID) }.value
@@ -755,7 +857,7 @@ final class MailStore {
 
     func authProvider(for account: Account) -> MailAuthProvider {
         let credentials = self.credentials
-        let oauth = account.provider.oauthProvider.flatMap { settings.oauthConfiguration(for: $0) }
+        let oauth = account.provider.oauthProvider.flatMap { OAuthClients.configuration(for: $0) }
         return { try await credentials.auth(for: account, oauth: oauth) }
     }
 
@@ -846,7 +948,7 @@ final class MailStore {
     }
 
     private func updateDockBadge() {
-        let unread = unreadCount(for: .allInboxes)
+        let unread = accounts.reduce(0) { $0 + unreadCount(forAccount: $1.id) }
         NSApp?.dockTile.badgeLabel = unread > 0 ? "\(unread)" : nil
     }
 }

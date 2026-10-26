@@ -10,7 +10,8 @@ enum AccountSecret: Codable, Sendable {
 /// Stores account secrets in the Keychain and hands out fresh credentials, refreshing OAuth
 /// access tokens when they are about to expire.
 actor CredentialStore {
-    private static let service = "com.honzakubita.qmail.accounts"
+    /// Keyed by bundle ID so a development copy (e.g. com.honzakubita.qmail.dev) never touches the real app's items.
+    private static let service = "\(Bundle.main.bundleIdentifier ?? "com.honzakubita.qmail").accounts"
     private var cache: [UUID: AccountSecret] = [:]
     private var refreshTasks: [UUID: Task<OAuthTokens, Error>] = [:]
 
@@ -68,7 +69,7 @@ actor CredentialStore {
         case .oauth(let tokens):
             guard tokens.needsRefresh else { return .oauth2(username: account.username, accessToken: tokens.accessToken) }
             guard let oauth else {
-                throw MailError.oauth("\(account.provider.displayName) sign-in isn't configured. Add a client ID in Settings ▸ Sign-In.")
+                throw MailError.oauth("\(account.provider.displayName) sign-in isn't set up in this build of qMail.")
             }
             let refreshed = try await refresh(tokens, accountID: account.id, config: oauth)
             return .oauth2(username: account.username, accessToken: refreshed.accessToken)

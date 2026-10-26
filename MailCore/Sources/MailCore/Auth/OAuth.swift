@@ -21,6 +21,9 @@ public struct OAuthConfiguration: Sendable, Hashable {
     public var clientSecret: String?
     public var redirectURI: String
     public var scopes: [String]
+    /// Scopes that must actually be granted for mail to work. Google's consent screen lets people
+    /// untick individual permissions, so sign-in can succeed without mail access.
+    public var mailScopes: [String]
     public var extraParameters: [String: String]
 
     public var callbackScheme: String {
@@ -38,6 +41,7 @@ public struct OAuthConfiguration: Sendable, Hashable {
             clientSecret: clientSecret?.isEmpty == true ? nil : clientSecret,
             redirectURI: "\(reversed):/oauth2redirect",
             scopes: ["https://mail.google.com/", "openid", "email", "profile"],
+            mailScopes: ["https://mail.google.com/"],
             extraParameters: ["access_type": "offline", "prompt": "consent"]
         )
     }
@@ -55,6 +59,7 @@ public struct OAuthConfiguration: Sendable, Hashable {
                 "https://outlook.office.com/SMTP.Send",
                 "offline_access", "openid", "email", "profile",
             ],
+            mailScopes: ["https://outlook.office.com/IMAP.AccessAsUser.All", "https://outlook.office.com/SMTP.Send"],
             extraParameters: ["prompt": "select_account", "response_mode": "query"]
         )
     }
@@ -66,6 +71,8 @@ public struct OAuthTokens: Codable, Sendable, Equatable {
     public var expiresAt: Date
     public var email: String?
     public var name: String?
+    /// Scopes the user actually granted, when the token response lists them.
+    public var grantedScopes: [String]?
 
     public var needsRefresh: Bool { expiresAt.timeIntervalSinceNow < 120 }
 }
@@ -130,13 +137,18 @@ public enum OAuthClient {
         ]
         if let secret = config.clientSecret { parameters["client_secret"] = secret }
         if config.provider == .microsoft { parameters["scope"] = config.scopes.joined(separator: " ") }
-        return try await tokenRequest(parameters, config: config, previous: nil)
+        let tokens = try await tokenRequest(parameters, config: config, previous: nil)
+        if let granted = tokens.grantedScopes {
+            let missing = config.mailScopes.filter { required in
+                !granted.contains { $0.caseInsensitiveCompare(required) == .orderedSame || required.hasSuffix("/" + $0) }
+            }
+            if !missing.isEmpty { throw MailError.mailAccessNotGranted }
+        }
+        return tokens
     }
 
     public static func refresh(_ tokens: OAuthTokens, config: OAuthConfiguration) async throws -> OAuthTokens {
-        guard let refreshToken = tokens.refreshToken else {
-            throw MailError.oauth("Your sign-in expired. Please sign in again.")
-        }
+        guard let refreshToken = tokens.refreshToken else { throw MailError.signInRequired }
         var parameters = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
@@ -144,14 +156,22 @@ public enum OAuthClient {
         ]
         if let secret = config.clientSecret { parameters["client_secret"] = secret }
         if config.provider == .microsoft { parameters["scope"] = config.scopes.joined(separator: " ") }
-        return try await tokenRequest(parameters, config: config, previous: tokens)
+        do {
+            return try await tokenRequest(parameters, config: config, previous: tokens)
+        } catch TokenError.invalidGrant {
+            // Refresh token expired (e.g. 7 days for Google apps in testing) or access was revoked.
+            throw MailError.signInRequired
+        }
     }
+
+    private enum TokenError: Error { case invalidGrant }
 
     private struct TokenResponse: Decodable {
         var access_token: String?
         var refresh_token: String?
         var expires_in: Double?
         var id_token: String?
+        var scope: String?
         var error: String?
         var error_description: String?
     }
@@ -164,6 +184,7 @@ public enum OAuthClient {
         let (data, _) = try await URLSession.shared.data(for: request)
         let response = try JSONDecoder().decode(TokenResponse.self, from: data)
         guard let accessToken = response.access_token else {
+            if response.error == "invalid_grant" && previous != nil { throw TokenError.invalidGrant }
             throw MailError.oauth(response.error_description ?? response.error ?? "Sign-in failed.")
         }
         let claims = response.id_token.flatMap(decodeJWTClaims) ?? [:]
@@ -173,7 +194,8 @@ public enum OAuthClient {
             refreshToken: response.refresh_token ?? previous?.refreshToken,
             expiresAt: Date().addingTimeInterval(response.expires_in ?? 3600),
             email: email,
-            name: (claims["name"] as? String) ?? previous?.name
+            name: (claims["name"] as? String) ?? previous?.name,
+            grantedScopes: response.scope.map { $0.split(separator: " ").map(String.init) } ?? previous?.grantedScopes
         )
     }
 

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct MessageListView: View {
     @Environment(MailStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
+    @Environment(AppNavigator.self) private var navigator
     let item: SidebarItem
     @Binding var selection: MessageSummary.ID?
     let searchText: String
@@ -45,7 +45,7 @@ struct MessageListView: View {
         let messages = visibleMessages
         List(selection: $selection) {
             ForEach(messages) { message in
-                MessageRow(message: message, showRecipients: isSentFolder, showAccount: item == .allInboxes)
+                MessageRow(message: message, showRecipients: isSentFolder, showAccount: false)
                     .tag(message.id)
                     .contextMenu { contextMenu(for: message) }
                     .swipeActions(edge: .leading) {
@@ -142,7 +142,7 @@ struct MessageListView: View {
                 }
                 .help("Show only unread messages")
                 Button {
-                    openWindow(id: "compose", value: ComposeRequest())
+                    navigator.startNewMessage(accountID: mailboxID.flatMap { store.mailbox(id: $0) }?.accountID)
                 } label: {
                     Label("New Message", systemImage: "square.and.pencil")
                 }
@@ -166,9 +166,9 @@ struct MessageListView: View {
 
     @ViewBuilder
     private func contextMenu(for message: MessageSummary) -> some View {
-        Button("Reply") { openWindow(id: "compose", value: ComposeRequest(mode: .reply, messageID: message.id)) }
-        Button("Reply All") { openWindow(id: "compose", value: ComposeRequest(mode: .replyAll, messageID: message.id)) }
-        Button("Forward") { openWindow(id: "compose", value: ComposeRequest(mode: .forward, messageID: message.id)) }
+        Button("Reply") { navigator.reply(to: message, all: false, store: store) }
+        Button("Reply All") { navigator.reply(to: message, all: true, store: store) }
+        Button("Forward") { Task { await navigator.forward(message, store: store) } }
         Divider()
         Button(message.isSeen ? "Mark as Unread" : "Mark as Read") { store.setRead([message], read: !message.isSeen) }
         Button(message.isFlagged ? "Unflag" : "Flag") { store.setFlagged([message], flagged: !message.isFlagged) }

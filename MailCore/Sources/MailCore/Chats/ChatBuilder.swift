@@ -1,19 +1,40 @@
 import Foundation
 
+/// One email conversation (a message and its replies) inside a chat — a Slack-style thread.
+public struct ChatThread: Identifiable, Hashable, Sendable {
+    /// Stable across syncs: derived from the thread's root Message-ID, even if the root itself isn't loaded.
+    public var id: String
+    /// Summary IDs in chronological order; the first one is shown in the chat, the rest as replies.
+    public var messageIDs: [String]
+    public var subject: String
+    public var startDate: Date
+    public var lastDate: Date
+    public var unreadCount: Int
+
+    public var rootID: String { messageIDs[0] }
+    public var replyIDs: ArraySlice<String> { messageIDs.dropFirst() }
+    public var replyCount: Int { messageIDs.count - 1 }
+}
+
 /// A conversation with a fixed set of people, built from one or more email threads.
 public struct Chat: Identifiable, Hashable, Sendable {
     public var id: String
     public var accountID: UUID
-    /// Everyone in the conversation except the account owner.
+    /// Everyone in the conversation except the account owner. Empty for mail to yourself.
     public var participants: [MailAddress]
     /// Summary IDs in chronological order.
     public var messageIDs: [String]
+    /// Threads ordered by when they started, like messages in a Slack channel.
+    public var threads: [ChatThread]
     public var lastDate: Date
     public var lastMessageID: String
     public var unreadCount: Int
     public var subjects: [String]
+    /// Only newsletters, notifications and other automated mail.
+    public var isAutomated: Bool
 
     public var isGroup: Bool { participants.count > 1 }
+    public var isSelf: Bool { participants.isEmpty }
 
     public var defaultTitle: String {
         let names = participants.map(\.shortName)
@@ -26,21 +47,27 @@ public struct Chat: Identifiable, Hashable, Sendable {
         }
     }
 
+    public func thread(containing messageID: String) -> ChatThread? {
+        threads.first { $0.messageIDs.contains(messageID) }
+    }
+
     public static func makeID(accountID: UUID, participants: [String]) -> String {
-        "\(accountID.uuidString)|" + participants.sorted().joined(separator: ",")
+        "\(accountID.uuidString)|" + (participants.isEmpty ? "self" : participants.sorted().joined(separator: ","))
     }
 }
 
 /// Groups email into chats: messages are first threaded (References / In-Reply-To / Gmail
-/// thread IDs), then threads that involve exactly the same people are merged into one chat.
+/// thread IDs). A thread where someone replied to the group goes to the group chat for exactly
+/// those people; any other message goes to the 1:1 chat with its sender (or with each recipient,
+/// for mail you sent), so a one-off email to several people doesn't create a group chat.
 public enum ChatBuilder {
     public struct Options: Sendable {
         /// Include threads that only contain newsletters, notifications and other automated mail.
-        public var includeAutomated = false
+        public var includeAutomated = true
         /// Only show conversations the user has written in.
         public var requireOwnMessage = false
 
-        public init(includeAutomated: Bool = false, requireOwnMessage: Bool = false) {
+        public init(includeAutomated: Bool = true, requireOwnMessage: Bool = false) {
             self.includeAutomated = includeAutomated
             self.requireOwnMessage = requireOwnMessage
         }
@@ -101,13 +128,26 @@ public enum ChatBuilder {
             threads[find(nodeKey(message)), default: []].append(message)
         }
 
-        // 3. Merge threads by participant set.
+        // 3. Place threads into chats. A thread is a group conversation only once someone has
+        //    replied to the group; until then each message lives in the 1:1 chat with its sender
+        //    (or, for your own messages, with each recipient) and shows who else it went to.
         struct ChatAccumulator {
             var accountID: UUID
             var participants: [String: MailAddress] = [:]
-            var messages: [MessageSummary] = []
+            /// Messages per thread, keyed by the thread's stable root key.
+            var threads: [String: [MessageSummary]] = [:]
         }
         var chats: [String: ChatAccumulator] = [:]
+
+        func place(_ messages: [MessageSummary], threadKey: String, with people: [MailAddress], accountID: UUID) {
+            var unique: [String: MailAddress] = [:]
+            for person in people where unique[person.normalizedEmail]?.name == nil { unique[person.normalizedEmail] = person }
+            let chatID = Chat.makeID(accountID: accountID, participants: Array(unique.keys))
+            var accumulator = chats[chatID] ?? ChatAccumulator(accountID: accountID)
+            accumulator.participants.merge(unique) { existing, new in existing.name == nil ? new : existing }
+            accumulator.threads[threadKey, default: []].append(contentsOf: messages)
+            chats[chatID] = accumulator
+        }
 
         for (_, threadMessages) in threads {
             guard let accountID = threadMessages.first?.accountID else { continue }
@@ -115,54 +155,92 @@ public enum ChatBuilder {
             let isMine: (MessageSummary) -> Bool = { message in
                 message.from.contains { mine.contains($0.normalizedEmail) }
             }
+            /// Everyone on a message except you, deduplicated.
+            let others: (MessageSummary) -> [MailAddress] = { message in
+                var seen = Set<String>()
+                return (message.from + message.to + message.cc).filter { address in
+                    let email = address.normalizedEmail
+                    return email.contains("@") && !mine.contains(email) && seen.insert(email).inserted
+                }
+            }
 
             let hasHuman = threadMessages.contains { !$0.isAutomated || isMine($0) }
             if !options.includeAutomated && !hasHuman { continue }
             if options.requireOwnMessage && !threadMessages.contains(where: isMine) { continue }
 
-            var people: [String: MailAddress] = [:]
-            for message in threadMessages {
-                for address in message.from + message.to + message.cc {
-                    let email = address.normalizedEmail
-                    guard email.contains("@"), !mine.contains(email) else { continue }
-                    // Prefer an address entry that carries a display name.
-                    if people[email]?.name == nil { people[email] = address }
+            let sorted = threadMessages.sorted { $0.date < $1.date }
+            let root = sorted[0]
+            // Replies reference the root's Message-ID first, so this survives loading older mail.
+            let threadKey = root.references.first ?? root.inReplyTo ?? root.messageID ?? root.id
+            let hasGroupReply = sorted.dropFirst().contains { others($0).count >= 2 }
+
+            if hasGroupReply {
+                place(sorted, threadKey: threadKey, with: sorted.flatMap(others), accountID: accountID)
+                continue
+            }
+            for message in sorted {
+                let people: [MailAddress]
+                if isMine(message) {
+                    // Sent by you: shows up in the chat with each recipient.
+                    people = others(message)
+                } else {
+                    people = Array((message.from.first.map { [$0] } ?? others(message)).prefix(1))
+                }
+                if people.isEmpty {
+                    // Mail to yourself goes to your own "(you)" chat.
+                    place([message], threadKey: threadKey, with: [], accountID: accountID)
+                }
+                for person in people {
+                    place([message], threadKey: threadKey, with: [person], accountID: accountID)
                 }
             }
-            guard !people.isEmpty else { continue }
-
-            let chatID = Chat.makeID(accountID: accountID, participants: Array(people.keys))
-            var accumulator = chats[chatID] ?? ChatAccumulator(accountID: accountID)
-            accumulator.participants.merge(people) { existing, new in existing.name == nil ? new : existing }
-            accumulator.messages.append(contentsOf: threadMessages)
-            chats[chatID] = accumulator
         }
 
         // 4. Finalize.
         var result: [Chat] = []
         for (chatID, accumulator) in chats {
             let mine = ownAddresses[accumulator.accountID] ?? []
-            let sorted = accumulator.messages.sorted { $0.date < $1.date }
-            guard let last = sorted.last else { continue }
-            let unread = sorted.filter { message in
+            let isUnread: (MessageSummary) -> Bool = { message in
                 !message.isSeen && !message.from.contains { mine.contains($0.normalizedEmail) }
-            }.count
+            }
+
+            let chatThreads: [ChatThread] = accumulator.threads.map { threadKey, messages in
+                let sorted = messages.sorted { $0.date < $1.date }
+                let root = sorted[0]
+                let subject = sorted.lazy.map(\.normalizedSubject).first { !$0.isEmpty } ?? ""
+                return ChatThread(
+                    id: "\(accumulator.accountID.uuidString)|t:\(threadKey)",
+                    messageIDs: sorted.map(\.id),
+                    subject: subject,
+                    startDate: root.date,
+                    lastDate: sorted.last?.date ?? root.date,
+                    unreadCount: sorted.filter(isUnread).count
+                )
+            }
+            .sorted { $0.startDate < $1.startDate }
+
+            let all = accumulator.threads.values.joined().sorted { $0.date < $1.date }
+            guard let last = all.last else { continue }
             var subjects: [String] = []
-            for message in sorted.reversed() {
+            for message in all.reversed() {
                 let subject = message.normalizedSubject
                 if !subject.isEmpty, !subjects.contains(subject) { subjects.append(subject) }
             }
+            let isAutomated = all.allSatisfy { $0.isAutomated && !$0.from.contains { mine.contains($0.normalizedEmail) } }
+
             result.append(Chat(
                 id: chatID,
                 accountID: accumulator.accountID,
                 participants: accumulator.participants.values.sorted {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 },
-                messageIDs: sorted.map(\.id),
+                messageIDs: all.map(\.id),
+                threads: chatThreads,
                 lastDate: last.date,
                 lastMessageID: last.id,
-                unreadCount: unread,
-                subjects: subjects
+                unreadCount: all.filter(isUnread).count,
+                subjects: subjects,
+                isAutomated: isAutomated
             ))
         }
         return result.sorted { $0.lastDate > $1.lastDate }

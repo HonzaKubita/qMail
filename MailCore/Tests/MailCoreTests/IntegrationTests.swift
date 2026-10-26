@@ -18,7 +18,7 @@ struct IntegrationTests {
 
         let info = try await imap.select("INBOX")
         #expect(info.exists > 5)
-        #expect(info.uidValidity == 7)
+        #expect(info.uidValidity > 0)
 
         let fetched = try await imap.fetchSummaries(in: "INBOX", sequenceRange: 1...info.exists)
         #expect(fetched.count == info.exists)

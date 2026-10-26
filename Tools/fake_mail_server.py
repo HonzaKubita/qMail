@@ -60,9 +60,11 @@ ATTRS = {
     "Projects": ["\\Noselect", "\\HasChildren"],
     "Projects/Ko&AWE-": ["\\HasNoChildren"],
 }
+# Data is re-seeded on every start, so tell clients their cached UIDs are no longer valid.
+UIDVALIDITY = int(time.time()) % 1_000_000
 for name in ATTRS:
     if "\\Noselect" not in ATTRS[name]:
-        MAILBOXES[name] = {"uidvalidity": 7, "uidnext": 1, "messages": []}
+        MAILBOXES[name] = {"uidvalidity": UIDVALIDITY, "uidnext": 1, "messages": []}
 
 
 def addr(p):
@@ -200,6 +202,12 @@ def seed():
             "Big savings on everything. Unsubscribe anytime.", minutes, "n%d@shop.example" % i, seen=i < 2,
             extra_headers=["List-Unsubscribe: <mailto:unsub@shop.example>", "Precedence: bulk"])
     put("INBOX", GITHUB, [ME], "[qmail] New issue opened", "A new issue was opened in qmail.", 30, "g1@github.com", seen=False)
+
+    # One-off emails to several people with no group reply: they stay in 1:1 chats.
+    put("INBOX", CAROL, [ME, DAVE], "Book club next month",
+        "Hi both! Want to start a small book club? First pick: Kafka on the Shore.", 60 * 8, "b1@example.cz", seen=False)
+    put("Sent", ME, [ALICE, DAVE], "Slides from today",
+        "Here are the slides from today's sync. Let me know if anything is unclear.", 60 * 6, "s1@qmail.test")
 
     put("Archive", ALICE, [ME], "Old photos", "Found these old photos from 2019!", 60 * 24 * 40, "arch1@example.com")
     put("Projects/Ko&AWE-", BOB, [ME], "Project folder test", "This lives in a nested folder with a Czech name.", 60 * 24 * 3, "p1@example.com")

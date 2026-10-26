@@ -6,9 +6,10 @@ struct AccountSetupView: View {
     @Environment(MailStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
-    @Environment(\.openSettings) private var openSettings
 
     @State private var provider: MailProvider?
+    /// Gmail can fall back to an app password instead of signing in with Google.
+    @State private var useAppPassword = false
     @State private var name = NSFullUserName()
     @State private var email = ""
     @State private var password = ""
@@ -27,7 +28,11 @@ struct AccountSetupView: View {
     var body: some View {
         Group {
             if let provider {
-                details(for: provider)
+                if provider.oauthProvider != nil && !useAppPassword {
+                    oauthPage(for: provider)
+                } else {
+                    details(for: provider)
+                }
             } else {
                 providerPicker
             }
@@ -89,9 +94,88 @@ struct AccountSetupView: View {
 
     // MARK: - Details
 
+    // MARK: - Sign in with Google / Microsoft
+
+    private func oauthPage(for provider: MailProvider) -> some View {
+        let kind = provider.oauthProvider ?? .google
+        let configured = OAuthClients.isConfigured(kind)
+        return VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            VStack(spacing: 16) {
+                ProviderIcon(provider: provider, size: 72)
+                Text("Add \(provider.displayName)")
+                    .font(.largeTitle.bold())
+                Text("You'll sign in with your \(kind.displayName) account in a secure browser window. qMail never sees your password.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 380)
+                Label("When \(kind.displayName) asks what qMail can access, make sure the box for reading and sending email is ticked.",
+                      systemImage: "checkmark.square.fill")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 400)
+                Button {
+                    Task { await signInWithOAuth(provider) }
+                } label: {
+                    Label("Sign in with \(kind.displayName)", systemImage: "person.badge.key.fill")
+                        .font(.title3.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .keyboardShortcut(.defaultAction)
+                .disabled(working || !configured)
+                .padding(.top, 8)
+
+                Group {
+                    if working {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(status ?? "").foregroundStyle(.secondary)
+                        }
+                    } else if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                    } else if !configured {
+                        Text("Sign in with \(kind.displayName) isn't set up in this build of qMail yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.callout)
+                .frame(maxWidth: 420, minHeight: 36)
+            }
+            .padding(.horizontal, 24)
+            Spacer(minLength: 24)
+            HStack(spacing: 12) {
+                Button {
+                    self.provider = nil
+                    error = nil
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .disabled(working)
+                Spacer()
+                if provider == .gmail {
+                    Button("Use an App Password Instead") {
+                        useAppPassword = true
+                        error = nil
+                    }
+                    .buttonStyle(.link)
+                    .disabled(working)
+                }
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+        }
+    }
+
+    // MARK: - Password sign-in
+
     private func details(for provider: MailProvider) -> some View {
-        let oauthKind = provider.oauthProvider
-        let oauthConfigured = oauthKind.flatMap { store.settings.oauthConfiguration(for: $0) } != nil
         let passwordAllowed = provider != .outlook
 
         return VStack(spacing: 0) {
@@ -110,39 +194,11 @@ struct AccountSetupView: View {
                     TextField("Email", text: $email, prompt: Text("name@example.com"))
                 }
 
-                if let oauthKind {
-                    Section {
-                        Button {
-                            Task { await signInWithOAuth(provider) }
-                        } label: {
-                            Label("Sign in with \(oauthKind.displayName)", systemImage: "person.badge.key.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.large)
-                        .disabled(working || !oauthConfigured)
-                        if !oauthConfigured {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text("Sign in with \(oauthKind.displayName) needs an OAuth client ID.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Open Settings") { openSettings() }
-                                    .controlSize(.small)
-                            }
-                        }
-                    } footer: {
-                        if provider == .outlook {
-                            Text("Microsoft requires signing in with your Microsoft account. Outlook's servers no longer accept passwords from mail apps.")
-                        }
-                    }
-                }
-
                 if passwordAllowed {
                     Section {
                         SecureField(provider == .other ? "Password" : "App Password", text: $password)
                     } header: {
-                        Text(oauthKind == nil ? "Password" : "Or use an app password")
+                        Text(provider == .other ? "Password" : "App Password")
                     } footer: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(provider.passwordHelp)
@@ -176,7 +232,11 @@ struct AccountSetupView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    self.provider = nil
+                    if useAppPassword {
+                        useAppPassword = false
+                    } else {
+                        self.provider = nil
+                    }
                     error = nil
                 } label: {
                     Label("Back", systemImage: "chevron.left")
@@ -223,6 +283,7 @@ struct AccountSetupView: View {
 
     private func select(_ option: MailProvider) {
         provider = option
+        useAppPassword = false
         error = nil
         if let imap = option.imap {
             imapHost = imap.host
@@ -295,38 +356,26 @@ struct AccountSetupView: View {
     }
 
     private func signInWithOAuth(_ provider: MailProvider) async {
-        guard let kind = provider.oauthProvider, let config = store.settings.oauthConfiguration(for: kind),
-              let imap = provider.imap, let smtp = provider.smtp else { return }
+        guard let kind = provider.oauthProvider, let imap = provider.imap, let smtp = provider.smtp else { return }
         working = true
         error = nil
-        status = "Waiting for \(kind.displayName)…"
+        status = "Waiting for \(kind.displayName) sign-in…"
         defer { working = false }
         do {
-            let pkce = PKCE()
-            let state = UUID().uuidString
-            let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-            let url = OAuthClient.authorizationURL(config, pkce: pkce, state: state, loginHint: address.isEmpty ? nil : address)
-            let callback = try await webAuthenticationSession.authenticate(
-                using: url, callbackURLScheme: config.callbackScheme, preferredBrowserSession: .ephemeral
-            )
-            status = "Finishing sign-in…"
-            let code = try OAuthClient.authorizationCode(from: callback, expectedState: state)
-            let tokens = try await OAuthClient.exchange(code: code, pkce: pkce, config: config)
-            let signedInAddress = tokens.email ?? address
-            guard signedInAddress.contains("@") else {
+            let tokens = try await OAuthSignIn.run(kind, loginHint: nil, using: webAuthenticationSession)
+            guard let address = tokens.email, address.contains("@") else {
                 throw MailError.oauth("Couldn't determine which email address you signed in with.")
             }
+            status = "Connecting to \(provider.displayName)…"
             let account = Account(
-                displayName: name.isEmpty ? (tokens.name ?? signedInAddress) : name, email: signedInAddress,
-                provider: provider, imap: imap, smtp: smtp, username: signedInAddress, authKind: .oauth,
-                saveSentCopy: !provider.savesSentMessages
+                displayName: tokens.name ?? name, email: address, provider: provider, imap: imap, smtp: smtp,
+                username: address, authKind: .oauth, saveSentCopy: !provider.savesSentMessages
             )
-            status = "Connecting…"
             try await store.verify(account, secret: .oauth(tokens))
             try await store.addAccount(account, secret: .oauth(tokens))
             dismiss()
-        } catch let authError as ASWebAuthenticationSessionError where authError.code == .canceledLogin {
-            // User closed the sign-in window.
+        } catch where OAuthSignIn.isCancellation(error) {
+            // The user closed the sign-in window.
         } catch {
             self.error = error.localizedDescription
         }

@@ -326,15 +326,23 @@ public actor IMAPClient {
 
     private func authenticate() async throws {
         let auth = try await authProvider()
+        var serverDetail: String?
         do {
             switch auth {
             case .oauth2:
                 let payload = auth.xoauth2Payload ?? ""
                 if capabilities.contains("SASL-IR") {
                     // On failure the server sends a JSON error as a continuation; answer with an empty line.
-                    try await execute("AUTHENTICATE XOAUTH2 \(payload)", redact: true) { _, _ in Data() }
+                    try await execute("AUTHENTICATE XOAUTH2 \(payload)", redact: true) { _, text in
+                        serverDetail = Self.xoauth2ErrorDetail(text)
+                        return Data()
+                    }
                 } else {
-                    try await execute("AUTHENTICATE XOAUTH2", redact: true) { index, _ in index == 0 ? Data(payload.utf8) : Data() }
+                    try await execute("AUTHENTICATE XOAUTH2", redact: true) { index, text in
+                        if index == 0 { return Data(payload.utf8) }
+                        serverDetail = Self.xoauth2ErrorDetail(text)
+                        return Data()
+                    }
                 }
             case .password(let username, let password):
                 if !capabilities.contains("LOGINDISABLED"), Self.isQuotable(username), Self.isQuotable(password) {
@@ -345,8 +353,19 @@ public actor IMAPClient {
                 }
             }
         } catch MailError.commandFailed(let message) {
-            throw MailError.authenticationFailed(message)
+            throw MailError.authenticationFailed(serverDetail.map { "\(message) — \($0)" } ?? message)
         }
+    }
+
+    /// Decodes the base64 JSON a server sends when an XOAUTH2 token is refused,
+    /// e.g. `{"status":"400","schemes":"Bearer","scope":"https://mail.google.com/"}`.
+    static func xoauth2ErrorDetail(_ text: String) -> String? {
+        guard let data = Data(base64Encoded: text.trimmingCharacters(in: .whitespaces)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var parts: [String] = []
+        if let status = json["status"] { parts.append("status \(status)") }
+        if let scope = json["scope"] { parts.append("requires scope \(scope)") }
+        return parts.isEmpty ? nil : "server says: " + parts.joined(separator: ", ")
     }
 
     private func refreshCapabilities() async throws {

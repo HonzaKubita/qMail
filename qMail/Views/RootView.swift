@@ -1,12 +1,14 @@
 import MailCore
 import SwiftUI
 
+/// Slack-style layout: account rail + chat sidebar, the open chat in the middle,
+/// and the selected thread in an inspector on the right.
 struct RootView: View {
     @Environment(MailStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
-    @State private var sidebarSelection: SidebarItem? = .chats
+    @Environment(AppNavigator.self) private var navigator
     @State private var selectedMessageID: MessageSummary.ID?
-    @State private var selectedChatID: Chat.ID?
+    /// The open chat's messages, to follow the conversation if its chat changes (someone joined or left).
+    @State private var openChatMessages: [String] = []
     @State private var searchText = ""
     @State private var showingAddAccount = false
 
@@ -31,50 +33,116 @@ struct RootView: View {
     }
 
     private var splitView: some View {
-        NavigationSplitView {
-            SidebarView(selection: $sidebarSelection, showingAddAccount: $showingAddAccount)
-                .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
-        } content: {
-            Group {
-                switch sidebarSelection ?? .chats {
-                case .chats:
-                    ChatListView(selection: $selectedChatID, searchText: searchText)
-                case let item:
-                    MessageListView(item: item, selection: $selectedMessageID, searchText: searchText)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 300, ideal: 370, max: 540)
+        @Bindable var navigator = navigator
+        return NavigationSplitView {
+            WorkspaceSidebar(
+                accountID: $navigator.accountID, selection: $navigator.selection, searchText: searchText,
+                showingAddAccount: $showingAddAccount
+            )
+            .navigationSplitViewColumnWidth(min: 290, ideal: 330, max: 440)
         } detail: {
             detail
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: sidebarSelection == .chats ? "Search Chats" : "Search")
-        .onChange(of: sidebarSelection) {
-            searchText = ""
-            selectedMessageID = nil
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search")
+        .onChange(of: navigator.selection) { selectedMessageID = nil }
+        .onChange(of: navigator.accountID) { _, newAccount in
+            // Switching workspace opens its most recent conversation.
+            switch navigator.selection {
+            case .chat(let id) where store.chat(id: id)?.accountID == newAccount: return
+            case .newMessage where navigator.newMessage?.accountID == newAccount: return
+            default: navigator.selection = newAccount.flatMap(defaultSelection)
+            }
         }
+        .onAppear(perform: validate)
+        .onChange(of: store.accounts) { validate() }
+        .onChange(of: store.chats) { followMovedChat() }
         #if DEBUG
-        .modifier(DebugSelection(showingAddAccount: $showingAddAccount, sidebar: $sidebarSelection, chat: $selectedChatID, message: $selectedMessageID))
+        .modifier(DebugSelection(showingAddAccount: $showingAddAccount, message: $selectedMessageID))
         #endif
     }
 
     @ViewBuilder
     private var detail: some View {
-        if sidebarSelection == .chats {
-            if let id = selectedChatID, let chat = store.chat(id: id) {
+        switch navigator.selection {
+        case .chat(let id):
+            if let chat = store.chat(id: id) {
                 ChatView(chat: chat)
                     .id(chat.id)
             } else {
-                EmptyDetailView(
-                    title: "No Chat Selected",
-                    message: "Group conversations with the same people show up here as chats.",
-                    systemImage: "bubble.left.and.bubble.right"
-                )
+                EmptyDetailView(title: "Conversation Moved", message: "Someone joined or left, so it continues in another chat.", systemImage: "bubble.left.and.bubble.right")
             }
-        } else if let id = selectedMessageID, let summary = store.summary(id: id) {
-            MessageDetailView(summary: summary)
-                .id(summary.id)
-        } else {
-            EmptyDetailView(title: "No Message Selected", message: "Choose a message to read it.", systemImage: "envelope")
+        case .mailbox(let id):
+            FolderView(mailboxID: id, selection: $selectedMessageID, searchText: searchText)
+                .id(id)
+        case .newMessage:
+            if let draft = navigator.newMessage {
+                NewMessageView(draft: draft)
+                    .id(draft.id)
+            }
+        case nil:
+            EmptyDetailView(
+                title: "No Chat Selected",
+                message: "Every email lives in a chat with the people on it. Pick one from the sidebar.",
+                systemImage: "bubble.left.and.bubble.right"
+            )
+        }
+    }
+
+    private func validate() {
+        if navigator.accountID.flatMap({ store.account($0) }) == nil {
+            navigator.accountID = store.accounts.first?.id
+        }
+        switch navigator.selection {
+        case .chat(let id) where store.chat(id: id) != nil: return
+        case .mailbox(let id) where store.mailbox(id: id) != nil: return
+        case .newMessage where navigator.newMessage.flatMap({ store.account($0.accountID) }) != nil: return
+        default: navigator.selection = navigator.accountID.flatMap(defaultSelection)
+        }
+    }
+
+    private func followMovedChat() {
+        guard case .chat(let id) = navigator.selection else { return }
+        if let chat = store.chat(id: id) {
+            openChatMessages = chat.messageIDs
+            return
+        }
+        // Find where the newest message we were looking at lives now.
+        for messageID in openChatMessages.reversed() {
+            if let summary = store.summary(id: messageID), let (chat, _) = store.chatAndThread(containing: summary) {
+                navigator.selection = .chat(chat.id)
+                return
+            }
+        }
+        navigator.selection = navigator.accountID.flatMap(defaultSelection)
+    }
+
+    private func defaultSelection(for accountID: UUID) -> SidebarItem? {
+        let sections = store.chatSections(for: accountID)
+        let recent = (sections.starred + sections.groups + sections.direct).max { $0.lastDate < $1.lastDate }
+        return (recent ?? sections.updates.first).map { .chat($0.id) }
+    }
+}
+
+/// A classic folder: message list on the left, the selected email on the right.
+struct FolderView: View {
+    @Environment(MailStore.self) private var store
+    let mailboxID: String
+    @Binding var selection: MessageSummary.ID?
+    let searchText: String
+
+    var body: some View {
+        HSplitView {
+            MessageListView(item: .mailbox(mailboxID), selection: $selection, searchText: searchText)
+                .frame(minWidth: 300, idealWidth: 380, maxWidth: 540)
+            Group {
+                if let id = selection, let summary = store.summary(id: id) {
+                    MessageDetailView(summary: summary)
+                        .id(summary.id)
+                } else {
+                    EmptyDetailView(title: "No Message Selected", message: "Choose a message to read it.", systemImage: "envelope")
+                }
+            }
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 struct MessageDetailView: View {
     @Environment(MailStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
+    @Environment(AppNavigator.self) private var navigator
     let summary: MessageSummary
     var showsToolbar = true
     @State private var parsed: ParsedMessage?
@@ -109,21 +109,21 @@ struct MessageDetailView: View {
         ToolbarSpacer(.fixed)
         ToolbarItemGroup {
             Button {
-                openWindow(id: "compose", value: ComposeRequest(mode: .reply, messageID: summary.id))
+                navigator.reply(to: current, all: false, store: store)
             } label: {
                 Label("Reply", systemImage: "arrowshape.turn.up.left")
             }
             .help("Reply")
             .keyboardShortcut("r")
             Button {
-                openWindow(id: "compose", value: ComposeRequest(mode: .replyAll, messageID: summary.id))
+                navigator.reply(to: current, all: true, store: store)
             } label: {
                 Label("Reply All", systemImage: "arrowshape.turn.up.left.2")
             }
             .help("Reply All")
             .keyboardShortcut("r", modifiers: [.command, .shift])
             Button {
-                openWindow(id: "compose", value: ComposeRequest(mode: .forward, messageID: summary.id))
+                Task { await navigator.forward(current, store: store) }
             } label: {
                 Label("Forward", systemImage: "arrowshape.turn.up.right")
             }

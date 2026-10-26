@@ -10,9 +10,6 @@ struct SettingsView: View {
             Tab("Accounts", systemImage: "at") {
                 AccountsSettingsView()
             }
-            Tab("Sign-In", systemImage: "key") {
-                SignInSettingsView()
-            }
         }
         .frame(width: 600)
     }
@@ -41,8 +38,6 @@ private struct GeneralSettingsView: View {
                 Toggle("Load remote images automatically", isOn: $settings.loadRemoteContent)
             }
             Section {
-                Toggle("Include newsletters and notifications", isOn: $settings.chatsIncludeAutomated)
-                Toggle("Only show conversations I've written in", isOn: $settings.chatsRequireOwnMessage)
                 LabeledContent("Hidden chats") {
                     Button("Show All (\(store.chatPreferences.hidden.count))") { store.unhideAllChats() }
                         .disabled(store.chatPreferences.hidden.isEmpty)
@@ -50,13 +45,11 @@ private struct GeneralSettingsView: View {
             } header: {
                 Text("Chats")
             } footer: {
-                Text("Chats group every email between the same people into one conversation, no matter the subject.")
+                Text("Every email lives in a chat with the people on it. Replies to an email collect in its thread, and a different group of people gets its own chat.")
             }
         }
         .formStyle(.grouped)
         .frame(minHeight: 380)
-        .onChange(of: settings.chatsIncludeAutomated) { store.rebuildChats() }
-        .onChange(of: settings.chatsRequireOwnMessage) { store.rebuildChats() }
     }
 }
 
@@ -158,47 +151,5 @@ private struct AccountDetailForm: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.contains("@") }
         store.updateAccount(account)
-    }
-}
-
-private struct SignInSettingsView: View {
-    @Environment(MailStore.self) private var store
-
-    var body: some View {
-        @Bindable var settings = store.settings
-        Form {
-            Section {
-                Text("Gmail and Outlook can sign in with your Google or Microsoft account instead of a password. Each needs an OAuth client ID registered by you (free). See README.md for step-by-step instructions.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Section {
-                TextField("Client ID", text: $settings.googleClientID, prompt: Text("1234-abc.apps.googleusercontent.com"))
-                TextField("Client secret (optional)", text: $settings.googleClientSecret)
-                if !settings.googleClientID.isEmpty, let config = settings.oauthConfiguration(for: .google) {
-                    LabeledContent("Redirect URI") {
-                        Text(config.redirectURI).textSelection(.enabled).font(.caption.monospaced())
-                    }
-                }
-                Link("Google Cloud Console ↗", destination: URL(string: "https://console.cloud.google.com/apis/credentials")!)
-            } header: {
-                Text("Google")
-            } footer: {
-                Text("Create an OAuth client of type “iOS” with bundle ID com.honzakubita.qmail and enable the Gmail API.")
-            }
-            Section {
-                TextField("Application (client) ID", text: $settings.microsoftClientID, prompt: Text("00000000-0000-0000-0000-000000000000"))
-                LabeledContent("Redirect URI") {
-                    Text(AppSettings.microsoftRedirectURI).textSelection(.enabled).font(.caption.monospaced())
-                }
-                Link("Microsoft Entra App Registrations ↗", destination: URL(string: "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade")!)
-            } header: {
-                Text("Microsoft")
-            } footer: {
-                Text("Register an app for “personal Microsoft accounts and work accounts”, add the redirect URI under Mobile and desktop applications, and grant IMAP.AccessAsUser.All and SMTP.Send.")
-            }
-        }
-        .formStyle(.grouped)
-        .frame(minHeight: 460)
     }
 }
