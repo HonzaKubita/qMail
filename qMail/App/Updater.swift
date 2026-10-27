@@ -62,6 +62,8 @@ final class Updater {
     }
 
     private static let checkInterval: TimeInterval = 24 * 60 * 60
+    /// Unpacked updates wait in folders named like this in the temporary directory.
+    nonisolated private static let stagingPrefix = "Update-"
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var started = false
 
@@ -79,6 +81,7 @@ final class Updater {
     func start() {
         guard !started else { return }
         started = true
+        Self.removeLeftovers()
         #if DEBUG
         // Debug builds aren't released, so they only check when pointed at a test feed.
         guard ProcessInfo.processInfo.environment["QMAIL_UPDATE_FEED"] != nil else { return }
@@ -88,6 +91,16 @@ final class Updater {
                 await self?.checkAutomatically()
                 try? await Task.sleep(for: .seconds(6 * 60 * 60))
             }
+        }
+    }
+
+    /// Deletes unpacked updates that were never installed (refused, cancelled, or a crash in between),
+    /// so no stray copies of qMail stay behind, e.g. in Spotlight.
+    nonisolated private static func removeLeftovers() {
+        let temporary = FileManager.default.temporaryDirectory
+        let items = (try? FileManager.default.contentsOfDirectory(at: temporary, includingPropertiesForKeys: nil)) ?? []
+        for item in items where item.lastPathComponent.hasPrefix(stagingPrefix) {
+            try? FileManager.default.removeItem(at: item)
         }
     }
 
@@ -173,6 +186,7 @@ final class Updater {
             return
         }
         state = .downloading(release, progress: 0)
+        var staged: URL?
         do {
             let progress = DownloadProgress { [weak self] fraction in
                 Task { @MainActor in
@@ -187,44 +201,55 @@ final class Updater {
             try Task.checkCancellation()
             state = .installing(release)
             let app = try await Self.unpack(file, version: release.version)
+            staged = app.deletingLastPathComponent()
             try Task.checkCancellation()
             try handOff(app, replacing: installed)
-        } catch is CancellationError {
-            state = .idle
-        } catch let error as URLError where error.code == .cancelled {
-            state = .idle
         } catch {
-            state = .failed(error.localizedDescription, release: release)
+            if let staged { try? FileManager.default.removeItem(at: staged) }
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                state = .idle
+            } else {
+                state = .failed(error.localizedDescription, release: release)
+            }
         }
     }
 
     /// Unpacks the zip next to it and checks it holds this app, at that version, signed by this app's team.
     nonisolated private static func unpack(_ zip: URL, version: String) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
-            let folder = FileManager.default.temporaryDirectory.appending(path: "Update-\(UUID().uuidString)", directoryHint: .isDirectory)
+            let folder = FileManager.default.temporaryDirectory.appending(path: stagingPrefix + UUID().uuidString, directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: zip) }
-            let ditto = Process()
-            ditto.executableURL = URL(filePath: "/usr/bin/ditto")
-            ditto.arguments = ["-x", "-k", zip.path, folder.path]
-            try ditto.run()
-            ditto.waitUntilExit()
-            guard ditto.terminationStatus == 0 else { throw UpdateError("The download couldn't be unpacked.") }
-
-            let bundleName = Bundle.main.bundleURL.lastPathComponent
-            let app = (try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))
-                .first { $0.pathExtension == "app" }
-            guard let app, let bundle = Bundle(url: app), bundle.bundleIdentifier == Bundle.main.bundleIdentifier,
-                  bundle.infoDictionary?["CFBundleShortVersionString"] as? String == version
-            else { throw UpdateError("The download isn't qMail \(version).") }
-            guard let team = CodeSignature.ownTeam(),
-                  CodeSignature.isSigned(app, bundleID: bundle.bundleIdentifier ?? "", team: team)
-            else { throw UpdateError("The download's signature doesn't match this copy of qMail.") }
-            // Keep the installed name, e.g. a dev copy called qMailDev.app.
-            let renamed = folder.appending(path: bundleName)
-            if renamed != app { try FileManager.default.moveItem(at: app, to: renamed) }
-            return renamed
+            do {
+                return try unpack(zip, into: folder, version: version)
+            } catch {
+                try? FileManager.default.removeItem(at: folder)
+                throw error
+            }
         }.value
+    }
+
+    nonisolated private static func unpack(_ zip: URL, into folder: URL, version: String) throws -> URL {
+        let ditto = Process()
+        ditto.executableURL = URL(filePath: "/usr/bin/ditto")
+        ditto.arguments = ["-x", "-k", zip.path, folder.path]
+        try ditto.run()
+        ditto.waitUntilExit()
+        guard ditto.terminationStatus == 0 else { throw UpdateError("The download couldn't be unpacked.") }
+
+        let bundleName = Bundle.main.bundleURL.lastPathComponent
+        let app = (try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))
+            .first { $0.pathExtension == "app" }
+        guard let app, let bundle = Bundle(url: app), bundle.bundleIdentifier == Bundle.main.bundleIdentifier,
+              bundle.infoDictionary?["CFBundleShortVersionString"] as? String == version
+        else { throw UpdateError("The download isn't qMail \(version).") }
+        guard let team = CodeSignature.ownTeam(),
+              CodeSignature.isSigned(app, bundleID: bundle.bundleIdentifier ?? "", team: team)
+        else { throw UpdateError("The download's signature doesn't match this copy of qMail.") }
+        // Keep the installed name, e.g. a dev copy called qMailDev.app.
+        let renamed = folder.appending(path: bundleName)
+        if renamed != app { try FileManager.default.moveItem(at: app, to: renamed) }
+        return renamed
     }
 
     /// Opens qMail Updater to swap in `app` after qMail quits, then quits.
@@ -241,6 +266,7 @@ final class Updater {
         NSWorkspace.shared.open([request], withApplicationAt: helper, configuration: configuration) { _, error in
             Task { @MainActor in
                 if let error {
+                    try? FileManager.default.removeItem(at: app.deletingLastPathComponent())
                     self.state = .failed("qMail Updater couldn't be opened: \(error.localizedDescription)", release: nil)
                 } else {
                     NSApp.terminate(nil)
