@@ -16,6 +16,7 @@ import SwiftUI
 ///   QMAIL_SEND=text            with chat:N, post a new thread in that chat (exercises SMTP + APPEND)
 ///   QMAIL_REPLY=text           with chat:N, reply in that chat's latest thread
 ///   QMAIL_OPEN_THREAD=1        open the latest thread that has replies
+///   QMAIL_SELECT=activity      open Activity
 ///   QMAIL_SELECT=new           open New Message (QMAIL_NEW_TO=a@b.c,… prefills recipients)
 ///   QMAIL_SELECT=reply:N       Reply All from the Nth inbox message, or reply:Subject words (opens its chat thread)
 ///   QMAIL_REPLY_ALL=text       with reply:…, send a reply to everyone and follow it, like the bottom bar does
@@ -23,6 +24,9 @@ import SwiftUI
 ///   QMAIL_RESYNC=N             get new mail again N seconds after launch
 ///   QMAIL_SEARCH=text          type text into the search field
 ///   QMAIL_HOVER_ACCOUNT=N      show the Nth account's hover label in the rail
+///   QMAIL_UPDATE_FEED=url      check this release JSON for updates (Debug builds don't check otherwise)
+///   QMAIL_UPDATE_INSTALL=1     with QMAIL_UPDATE_FEED, install the update it finds right away
+///   QMAIL_FIND=text            print where cached mail from/about `text` landed, then quit (no sync)
 ///   QMAIL_SNAPSHOT=1           after a few seconds, write each window as base64 PNG to stderr
 ///                              (works while the screen is locked; Liquid Glass isn't drawn)
 extension MailStore {
@@ -30,6 +34,41 @@ extension MailStore {
     static let secondTestAccountEmail = "work@qmail.test"
     /// Demo accounts: the fake server's --demo mail is addressed to the first one.
     static let demoAccounts = [("Emma Lindqvist", "emma@example.com"), ("Emma Lindqvist", "emma@studio.example.com")]
+
+    /// QMAIL_FIND=text: prints where cached messages whose sender or subject contains `text` ended up
+    /// (folder, chat, position in their thread) to stderr, then quits before syncing or showing anything.
+    func runFindIfRequested() {
+        guard let text = ProcessInfo.processInfo.environment["QMAIL_FIND"] else { return }
+        func log(_ line: String) { FileHandle.standardError.write(Data((line + "\n").utf8)) }
+        for account in accounts {
+            log("ACCOUNT \(account.email)")
+            for mailbox in mailboxes[account.id] ?? [] where mailbox.role != .custom {
+                let list = messages[mailbox.id] ?? []
+                let state = folderStates[mailbox.id]
+                log("FOLDER \(mailbox.path) role=\(mailbox.role) cached=\(list.count) exists=\(state?.exists ?? -1) lastSync=\(state?.lastSync.map { "\($0)" } ?? "-") newest=\(list.map(\.date).max().map { "\($0)" } ?? "-")")
+            }
+            let found = summaryIndex.values.filter { summary in
+                summary.accountID == account.id
+                    && "\(summary.sender?.email ?? "") \(summary.sender?.name ?? "") \(summary.subject)".localizedCaseInsensitiveContains(text)
+            }
+            for summary in found.sorted(by: { $0.date > $1.date }).prefix(25) {
+                var place = "NOT IN ANY CHAT"
+                if let (chat, thread) = chatAndThread(containing: summary) {
+                    let position = thread.messageIDs.firstIndex { summaryIndex[$0]?.messageID == summary.messageID } ?? -1
+                    place = "chat=\(title(for: chat)) hidden=\(chatPreferences.hidden.contains(chat.id)) thread=\((chat.threads.firstIndex(of: thread) ?? -1) + 1)/\(chat.threads.count) position=\(position + 1)/\(thread.messageIDs.count) threadStart=\(thread.startDate)"
+                }
+                log("MSG \(summary.date) folder=\(summary.mailboxPath) from=\(summary.sender?.email ?? "-") seen=\(summary.isSeen) gmailThread=\(summary.gmailThreadID ?? "-") subject=\(summary.subject.prefix(50)) | \(place)")
+                let validity = folderStates[Mailbox.makeID(accountID: account.id, path: summary.mailboxPath)]?.uidValidity ?? 0
+                if let data = Persistence.loadBody(summary, uidValidity: validity) {
+                    let parsed = ParsedMessage(data: data)
+                    log("  BODY bytes=\(data.count) plain=\(parsed.textBody?.count ?? -1) html=\(parsed.htmlBody?.count ?? -1) chat=\(QuoteStripper.chatText(for: parsed).prefix(300).debugDescription)")
+                } else {
+                    log("  BODY not on disk")
+                }
+            }
+        }
+        exit(0)
+    }
 
     func installTestAccountIfRequested() async {
         guard let mode = ProcessInfo.processInfo.environment["QMAIL_TEST_SERVER"] else { return }
@@ -159,6 +198,10 @@ struct DebugSelection: ViewModifier {
                         try? await Task.sleep(for: .milliseconds(100))
                         navigator.selection = .chat(chat.id)
                     }
+                    return
+                }
+                if parts.first == "activity", !chats.isEmpty {
+                    navigator.selection = .activity
                     return
                 }
                 if parts.first == "new", let account = store.accounts.first, !chats.isEmpty {

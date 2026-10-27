@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>qMail – Email that reads like a chat</title>
+  <meta name="description" content="qMail is a free, open-source email app for macOS that shows your inbox as Slack-style chats. Your mail stays on your Mac.">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="icon.png" alt="">qMail</a>
+      <nav class="links">
+        <a class="wide" href="#features">Features</a>
+        <a class="wide" href="#google">Google accounts</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="https://github.com/HonzaKubita/qMail">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero wrap">
+      <img class="icon" src="icon.png" alt="qMail app icon">
+      <h1>qMail</h1>
+      <p class="tagline">Email that reads like a chat. A native Mac mail app that turns your inbox into Slack-style conversations.</p>
+      <div class="buttons">
+        <a class="button primary" href="https://github.com/HonzaKubita/qMail/releases/latest">Download for Mac</a>
+        <a class="button" href="https://github.com/HonzaKubita/qMail">Source code</a>
+      </div>
+      <p class="fine">Free and open source · macOS 26 Tahoe or later · Signed and notarized by Apple</p>
+      <div class="shot">
+        <img class="light" src="chat-light.png" width="2000" height="1250" alt="A group chat in qMail: emails between four friends shown as chat messages, with the account's chats in the sidebar">
+        <img class="dark" src="chat-dark.png" width="2000" height="1250" alt="The same group chat in qMail's dark mode">
+      </div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>Your inbox, as conversations</h2>
+        <p class="lead">qMail is an email client for macOS. It works with Gmail, iCloud, Fastmail, Yahoo and any IMAP account, and it shows each email inside a chat with the people on it, like Slack.</p>
+        <div class="grid">
+          <div class="card"><h3>Chats instead of an inbox</h3><p>Direct messages, group chats and Updates (newsletters and notifications) in the sidebar. An email and its replies form a thread.</p></div>
+          <div class="card"><h3>Clean messages</h3><p>Quoted text, “On … wrote:” headers and signatures are stripped, so you read what people actually wrote. Photos show inline.</p></div>
+          <div class="card"><h3>Reply in place</h3><p>Type at the bottom of a chat to email everyone in it. People who don't use qMail just get normal email.</p></div>
+          <div class="card"><h3>Activity</h3><p>Every email in one list, newest first, when you'd rather see everything in order.</p></div>
+          <div class="card"><h3>Search everything</h3><p>A full-text index of your whole mailbox, kept on your Mac. Search ignores case and accents.</p></div>
+          <div class="card"><h3>Private by design</h3><p>No qMail servers, no account, no tracking. Remote images in emails are blocked until you load them.</p></div>
+        </div>
+        <div class="pair">
+          <figure><img src="thread.png" width="2000" height="1250" alt="A direct message with a thread of replies open beside it"><figcaption>Replies open as a thread beside the chat.</figcaption></figure>
+          <figure><img src="search.png" width="2000" height="1250" alt="Search results for “terrace” under the search field"><figcaption>Search finds chats and emails across your whole mailbox.</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="google">
+      <div class="wrap narrow">
+        <h2>Using qMail with a Google account</h2>
+        <p class="lead">To add a Gmail or Google Workspace account, choose <strong>Sign in with Google</strong>. Google asks whether you allow qMail to access your mail; qMail never sees your Google password.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Permission</th><th>What qMail does with it</th></tr></thead>
+            <tbody>
+              <tr><td><code>https://mail.google.com/</code><br>Read, compose, send and delete email</td><td>Connects to Gmail over IMAP and SMTP, the standard mail protocols, to download your email, show it as chats, search it, and send, move, archive or delete messages when you ask it to.</td></tr>
+              <tr><td><code>openid</code>, <code>email</code>, <code>profile</code></td><td>Reads your name and email address to set up the account in qMail and to put your name on email you send.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Your email goes directly between your Mac and Google. qMail has no servers of its own: messages, the search index and your sign-in tokens are stored only on your Mac (tokens in the macOS Keychain), and nothing is sent to the developer or to anyone else. Read the full <a href="privacy.html">Privacy Policy</a>.</p>
+        <div class="notice">
+          <p>qMail's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+        </div>
+        <p>You can remove an account in qMail › Settings › Accounts, which deletes everything qMail stored for it, and you can revoke qMail's access at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="wrap narrow">
+        <h2>Get qMail</h2>
+        <p class="lead">Download <strong>qMail-x.y.dmg</strong> from the latest release, open it and drag qMail to Applications. After that, qMail keeps itself up to date.</p>
+        <div class="buttons" style="justify-content:flex-start">
+          <a class="button primary" href="https://github.com/HonzaKubita/qMail/releases/latest">Download the latest release</a>
+          <a class="button" href="https://github.com/HonzaKubita/qMail/issues">Report a problem</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>qMail by Honza Kubita</span>
+      <nav class="links">
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="terms.html">Terms of Service</a>
+        <a href="https://github.com/HonzaKubita/qMail/issues">Contact</a>
+        <a href="https://github.com/HonzaKubita/qMail">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

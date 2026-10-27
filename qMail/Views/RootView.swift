@@ -10,6 +10,9 @@ struct RootView: View {
     /// The open chat's messages, to follow the conversation if its chat changes (someone joined or left).
     @State private var openChatMessages: [String] = []
     @State private var searchText = ""
+    @State private var searchFocused = false
+    /// Results show in the middle under the search field until one is opened.
+    @State private var showingSearchResults = false
     @State private var showingAddAccount = false
 
     var body: some View {
@@ -36,18 +39,36 @@ struct RootView: View {
         @Bindable var navigator = navigator
         return NavigationSplitView {
             WorkspaceSidebar(
-                accountID: $navigator.accountID, selection: $navigator.selection, searchText: searchText,
+                accountID: $navigator.accountID, selection: $navigator.selection,
                 showingAddAccount: $showingAddAccount
             )
             .navigationSplitViewColumnWidth(min: 290, ideal: 330, max: 440)
         } detail: {
-            detail
+            if showingSearchResults, let account = navigator.accountID.flatMap({ store.account($0) }) {
+                SearchResultsView(account: account, query: searchQuery) { item in
+                    showingSearchResults = false
+                    navigator.selection = item
+                }
+                .id(account.id)
+            } else {
+                detail
+            }
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search")
-        .onChange(of: navigator.selection) { selectedMessageID = nil }
+        .searchable(text: $searchText, isPresented: $searchFocused, placement: .toolbarPrincipal, prompt: "Search")
+        .onSubmit(of: .search) { showingSearchResults = searchShowsResults }
+        .onChange(of: searchText) { showingSearchResults = searchShowsResults }
+        .onChange(of: searchFocused) { _, focused in
+            // Back in the search field: show the results for what's still in it.
+            if focused { showingSearchResults = searchShowsResults }
+        }
+        .onChange(of: navigator.selection) {
+            selectedMessageID = nil
+            showingSearchResults = false
+        }
         .onChange(of: navigator.accountID) { _, newAccount in
             // Switching workspace opens its most recent conversation.
             switch navigator.selection {
+            case .activity: return
             case .chat(let id) where store.chat(id: id)?.accountID == newAccount: return
             case .newMessage where navigator.newMessage?.accountID == newAccount: return
             default: navigator.selection = newAccount.flatMap(defaultSelection)
@@ -55,7 +76,12 @@ struct RootView: View {
         }
         .onAppear(perform: validate)
         #if DEBUG
-        .onAppear { if let query = ProcessInfo.processInfo.environment["QMAIL_SEARCH"] { searchText = query } }
+        .task {
+            // After QMAIL_SELECT has opened its chat, like typing into the field.
+            guard let query = ProcessInfo.processInfo.environment["QMAIL_SEARCH"] else { return }
+            try? await Task.sleep(for: .seconds(3))
+            searchText = query
+        }
         .task {
             // QMAIL_RESYNC=N gets new mail again N seconds after launch, to see the toolbar while it loads.
             guard let delay = ProcessInfo.processInfo.environment["QMAIL_RESYNC"].flatMap(Double.init) else { return }
@@ -70,9 +96,22 @@ struct RootView: View {
         #endif
     }
 
+    private var searchQuery: String { searchText.trimmingCharacters(in: .whitespaces) }
+
+    /// A folder filters its own message list instead.
+    private var searchShowsResults: Bool {
+        if case .mailbox = navigator.selection { return false }
+        return !searchQuery.isEmpty
+    }
+
     @ViewBuilder
     private var detail: some View {
         switch navigator.selection {
+        case .activity:
+            if let account = navigator.accountID.flatMap({ store.account($0) }) {
+                ActivityView(account: account)
+                    .id(account.id)
+            }
         case .chat(let id):
             if let chat = store.chat(id: id) {
                 ChatView(chat: chat)
@@ -118,6 +157,7 @@ struct RootView: View {
         case .mailbox(let id) where store.mailbox(id: id) != nil: return
         case .newMessage where navigator.newMessage.flatMap({ store.account($0.accountID) }) != nil: return
         case .message(let id) where store.summary(id: id) != nil: return
+        case .activity where navigator.accountID != nil: return
         default: navigator.selection = navigator.accountID.flatMap(defaultSelection)
         }
     }

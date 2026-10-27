@@ -8,19 +8,63 @@
 
 /* Begin PBXBuildFile section */
 		B10000000000000000000001 /* MailCore in Frameworks */ = {isa = PBXBuildFile; productRef = B10000000000000000000002 /* MailCore */; };
+		C1000000000000000000000A /* qMail Updater.app in Embed Helpers */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* qMail Updater.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C10000000000000000000006;
+			remoteInfo = qMailUpdater;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C1000000000000000000000B /* Embed Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				C1000000000000000000000A /* qMail Updater.app in Embed Helpers */,
+			);
+			name = "Embed Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* qMail.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = qMail.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000010 /* qMail.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = qMail.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000011 /* MailCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MailCore; sourceTree = "<group>"; };
 		A10000000000000000000012 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		C10000000000000000000001 /* qMail Updater.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "qMail Updater.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C1000000000000000000000E /* Exceptions for "qMailUpdater" folder in "qMailUpdater" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C10000000000000000000006 /* qMailUpdater */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000002 /* qMail */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = qMail;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000002 /* qMailUpdater */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C1000000000000000000000E /* Exceptions for "qMailUpdater" folder in "qMailUpdater" target */,
+			);
+			path = qMailUpdater;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -34,6 +78,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -44,6 +95,7 @@
 				A10000000000000000000011 /* MailCore */,
 				A10000000000000000000010 /* qMail.entitlements */,
 				A10000000000000000000002 /* qMail */,
+				C10000000000000000000002 /* qMailUpdater */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -52,6 +104,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000001 /* qMail.app */,
+				C10000000000000000000001 /* qMail Updater.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -66,10 +119,12 @@
 				A10000000000000000000008 /* Sources */,
 				A10000000000000000000003 /* Frameworks */,
 				A10000000000000000000009 /* Resources */,
+				C1000000000000000000000B /* Embed Helpers */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				C1000000000000000000000D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000002 /* qMail */,
@@ -80,6 +135,26 @@
 			);
 			productName = qMail;
 			productReference = A10000000000000000000001 /* qMail.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C10000000000000000000006 /* qMailUpdater */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000007 /* Build configuration list for PBXNativeTarget "qMailUpdater" */;
+			buildPhases = (
+				C10000000000000000000004 /* Sources */,
+				C10000000000000000000003 /* Frameworks */,
+				C10000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C10000000000000000000002 /* qMailUpdater */,
+			);
+			name = qMailUpdater;
+			productName = qMailUpdater;
+			productReference = C10000000000000000000001 /* qMail Updater.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -93,6 +168,9 @@
 				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					A10000000000000000000006 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+					C10000000000000000000006 = {
 						CreatedOnToolsVersion = 27.1;
 					};
 				};
@@ -115,12 +193,20 @@
 			projectRoot = "";
 			targets = (
 				A10000000000000000000006 /* qMail */,
+				C10000000000000000000006 /* qMailUpdater */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A10000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -137,7 +223,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C10000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C10000000000000000000006 /* qMailUpdater */;
+			targetProxy = C1000000000000000000000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1000000000000000000000C /* Debug */ = {
@@ -213,8 +314,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.honzakubita.qmail;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX)";
+				PRODUCT_NAME = "$(TARGET_NAME)$(QMAIL_NAME_SUFFIX)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
 			};
@@ -241,9 +342,49 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.honzakubita.qmail;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX)";
+				PRODUCT_NAME = "$(TARGET_NAME)$(QMAIL_NAME_SUFFIX)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		C10000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = qMailUpdater/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "qMail Updater";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX).updater";
+				PRODUCT_NAME = "qMail Updater";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C10000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = qMailUpdater/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "qMail Updater";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX).updater";
+				PRODUCT_NAME = "qMail Updater";
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
@@ -265,6 +406,15 @@
 			buildConfigurations = (
 				A1000000000000000000000C /* Debug */,
 				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C10000000000000000000007 /* Build configuration list for PBXNativeTarget "qMailUpdater" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000008 /* Debug */,
+				C10000000000000000000009 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

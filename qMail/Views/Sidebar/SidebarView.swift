@@ -8,7 +8,6 @@ struct WorkspaceSidebar: View {
     @Environment(AppNavigator.self) private var navigator
     @Binding var accountID: UUID?
     @Binding var selection: SidebarItem?
-    let searchText: String
     @Binding var showingAddAccount: Bool
 
     var body: some View {
@@ -16,7 +15,7 @@ struct WorkspaceSidebar: View {
             AccountRail(accountID: $accountID, showingAddAccount: $showingAddAccount)
                 .zIndex(1) // its hover labels overlap the chat list
             if let account = accountID.flatMap({ store.account($0) }) {
-                ChatSidebar(account: account, selection: $selection, searchText: searchText)
+                ChatSidebar(account: account, selection: $selection)
                     .id(account.id)
             }
         }
@@ -216,17 +215,12 @@ private struct ChatSidebar: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     let account: Account
     @Binding var selection: SidebarItem?
-    let searchText: String
     @State private var collapsed: Set<String> = ["folders"]
     @State private var renaming: Chat?
     @State private var newName = ""
-    /// Matches from the index of all mail, newest first.
-    @State private var messageHits: [MessageSummary] = []
-
-    private var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        let sections = store.chatSections(for: account.id, matching: searchText, hits: Set(messageHits.compactMap(\.messageID)))
+        let sections = store.chatSections(for: account.id)
         VStack(spacing: 0) {
             header
             List(selection: $selection) {
@@ -241,6 +235,9 @@ private struct ChatSidebar: View {
                     .tint(.orange)
                     .help(store.accountErrors[account.id] ?? "Your sign-in has expired.")
                 }
+                Label("Activity", systemImage: "clock.arrow.circlepath")
+                    .badge(store.unreadCount(forAccount: account.id))
+                    .tag(SidebarItem.activity)
                 if selection == .newMessage {
                     Label("New message", systemImage: "square.and.pencil")
                         .tag(SidebarItem.newMessage)
@@ -249,11 +246,8 @@ private struct ChatSidebar: View {
                 chatSection("Group chats", key: "groups", chats: sections.groups)
                 chatSection("Direct messages", key: "direct", chats: sections.direct)
                 chatSection("Updates", key: "updates", chats: sections.updates)
-                if isSearching {
-                    searchResults
-                }
-                if sections.isEmpty && (!isSearching || messageHits.isEmpty) {
-                    Text(searchText.isEmpty ? (store.syncingAccounts.contains(account.id) ? "Loading conversations…" : "No conversations yet") : "No matches")
+                if sections.isEmpty {
+                    Text(store.syncingAccounts.contains(account.id) ? "Loading conversations…" : "No conversations yet")
                         .foregroundStyle(.secondary)
                         .font(.callout)
                 }
@@ -270,16 +264,6 @@ private struct ChatSidebar: View {
             }
             .listStyle(.sidebar)
         }
-        .task(id: "\(account.id)|\(searchText)") {
-            let query = searchText.trimmingCharacters(in: .whitespaces)
-            guard !query.isEmpty else { messageHits = []; return }
-            try? await Task.sleep(for: .milliseconds(200)) // wait for typing to pause
-            guard !Task.isCancelled else { return }
-            let results = await store.searchAllMail(query, accountID: account.id)
-            guard !Task.isCancelled else { return }
-            var seen = Set<String>()
-            messageHits = results.filter { seen.insert($0.messageID ?? $0.id).inserted }
-        }
         .alert("Rename Chat", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Save") {
@@ -289,39 +273,6 @@ private struct ChatSidebar: View {
             Button("Cancel", role: .cancel) { renaming = nil }
         } message: {
             Text("Leave empty to use the participants' names.")
-        }
-    }
-
-    /// Individual emails matching the search, from anywhere in the mailbox.
-    @ViewBuilder
-    private var searchResults: some View {
-        let status = store.indexStatus[account.id]
-        if !messageHits.isEmpty {
-            Section {
-                ForEach(messageHits.prefix(100)) { summary in
-                    SearchResultRow(summary: summary, account: account)
-                        .tag(SidebarItem.message(summary.id))
-                }
-            } header: {
-                Text(messageHits.count > 100 ? "Messages (100 newest)" : "Messages")
-            }
-        }
-        if let status, !status.isComplete, status.total > 0 {
-            Label {
-                Text("Downloading mail for search: \(status.withText.formatted()) of \(status.total.formatted())")
-            } icon: {
-                ProgressView(value: Double(status.withText), total: Double(max(status.total, 1)))
-                    .progressViewStyle(.circular)
-                    .controlSize(.mini)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .selectionDisabled()
-        } else if status == nil, !store.settings.downloadAllMail {
-            Text("Search covers recent mail. Turn on “Download all mail for search” in Settings to search everything.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .selectionDisabled()
         }
     }
 
@@ -415,42 +366,5 @@ private struct ChatSidebarRow: View {
                 .lineLimit(1)
         }
         .help(chat.participants.map(\.email).joined(separator: ", "))
-    }
-}
-
-/// A message found by search: who, when, subject and the start of the text.
-private struct SearchResultRow: View {
-    @Environment(MailStore.self) private var store
-    let summary: MessageSummary
-    let account: Account
-
-    var body: some View {
-        let fromMe = store.isOwn(summary.sender, accountID: account.id)
-        let person = fromMe ? summary.to.first : summary.sender
-        HStack(alignment: .top, spacing: 8) {
-            AvatarView(address: person, size: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(fromMe ? "To \(person?.displayName ?? "")" : person?.displayName ?? "Unknown")
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(DateText.short(summary.date))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text(summary.subject.isEmpty ? "(No Subject)" : summary.subject)
-                    .font(.callout)
-                    .lineLimit(1)
-                let preview = QuoteStripper.cleanSnippet(summary.snippet)
-                if preview.contains(where: { $0.isLetter || $0.isNumber }) {
-                    Text(preview)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding(.vertical, 2)
     }
 }

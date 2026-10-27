@@ -9,6 +9,8 @@ enum SidebarItem: Hashable, Codable {
     case newMessage
     /// A search result: opens in its chat, or as an email if it isn't in one.
     case message(String)
+    /// Every email in the selected workspace, newest first.
+    case activity
 }
 
 /// A workspace's chats grouped the way the sidebar shows them.
@@ -19,6 +21,15 @@ struct ChatSections {
     var updates: [Chat] = []
 
     var isEmpty: Bool { starred.isEmpty && groups.isEmpty && direct.isEmpty && updates.isEmpty }
+}
+
+/// One email in the Activity feed and where it lives.
+struct ActivityItem: Identifiable {
+    var summary: MessageSummary
+    var chat: Chat
+    var threadID: String
+
+    var id: String { summary.id }
 }
 
 /// What a chat bubble shows for one message.
@@ -87,6 +98,9 @@ final class MailStore {
             }
         }
         rebuildChats()
+        #if DEBUG
+        runFindIfRequested()
+        #endif
         isLoaded = true
         await refreshIndexStatus()
         #if DEBUG
@@ -148,7 +162,7 @@ final class MailStore {
 
     func messages(for item: SidebarItem) -> [MessageSummary] {
         switch item {
-        case .chat, .newMessage, .message: []
+        case .chat, .newMessage, .message, .activity: []
         case .mailbox(let id): messages[id] ?? []
         }
     }
@@ -159,6 +173,7 @@ final class MailStore {
         case .mailbox(let id): mailbox(id: id)?.displayName ?? "Mailbox"
         case .newMessage: "New Message"
         case .message(let id): summaryIndex[id]?.subject ?? "Message"
+        case .activity: "Activity"
         }
     }
 
@@ -166,7 +181,7 @@ final class MailStore {
         switch item {
         case .chat(let id): chat(id: id)?.unreadCount ?? 0
         case .mailbox: messages(for: item).reduce(0) { $0 + ($1.isSeen ? 0 : 1) }
-        case .newMessage, .message: 0
+        case .newMessage, .message, .activity: 0
         }
     }
 
@@ -254,6 +269,20 @@ final class MailStore {
                 (chatContents[id]?.text ?? summaryIndex[id]?.snippet ?? "").localizedCaseInsensitiveContains(query)
                     || summaryIndex[id]?.messageID.map(hits.contains) ?? false
             }
+    }
+
+    /// Every email in a workspace's chats, newest first, with the chat and thread it lives in.
+    func activity(for accountID: UUID) -> [ActivityItem] {
+        var items: [ActivityItem] = []
+        var seen = Set<String>()
+        for chat in visibleChats(for: accountID) {
+            for thread in chat.threads {
+                for id in thread.messageIDs where seen.insert(id).inserted {
+                    if let summary = summaryIndex[id] { items.append(ActivityItem(summary: summary, chat: chat, threadID: thread.id)) }
+                }
+            }
+        }
+        return items.sorted { $0.summary.date > $1.summary.date }
     }
 
     func title(for chat: Chat) -> String {
@@ -477,7 +506,7 @@ final class MailStore {
     func refreshIfStale(_ item: SidebarItem) async {
         let targets: [Mailbox]
         switch item {
-        case .chat, .newMessage, .message: return
+        case .chat, .newMessage, .message, .activity: return
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         for mailbox in targets {
@@ -581,7 +610,7 @@ final class MailStore {
     func searchOnServer(_ item: SidebarItem, query: String) async -> [MessageSummary] {
         let targets: [Mailbox]
         switch item {
-        case .chat, .newMessage, .message: return []
+        case .chat, .newMessage, .message, .activity: return []
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         var results: [MessageSummary] = []

@@ -25,9 +25,12 @@ struct SettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(MailStore.self) private var store
+    @Environment(Updater.self) private var updater
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var settings = store.settings
+        @Bindable var updater = updater
         Form {
             Section("Mail") {
                 Picker("Check for new mail", selection: $settings.refreshMinutes) {
@@ -67,6 +70,23 @@ private struct GeneralSettingsView: View {
                 Text("Chats")
             } footer: {
                 Text("Every email lives in a chat with the people on it. Replies to an email collect in its thread, and a different group of people gets its own chat.")
+            }
+            Section {
+                Toggle("Check for updates automatically", isOn: $updater.automaticChecks)
+                LabeledContent("qMail \(Updater.currentVersion)") {
+                    Button("Check Now") {
+                        updater.checkNow()
+                        openWindow(id: UpdateWindowPresenter.windowID)
+                    }
+                }
+            } header: {
+                Text("Updates")
+            } footer: {
+                if let lastCheck = updater.lastCheck {
+                    Text("Last checked \(lastCheck.formatted(.relative(presentation: .named))). qMail looks for a new release on GitHub once a day.")
+                } else {
+                    Text("qMail looks for a new release on GitHub once a day.")
+                }
             }
         }
         .formStyle(.grouped)
