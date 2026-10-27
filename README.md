@@ -4,7 +4,7 @@ A simple, native macOS mail client built with SwiftUI and Liquid Glass. It works
 
 ## Features
 
-- **Workspaces.** Each account appears in a rail on the left, with an unread badge. Accounts never mix.
+- **Workspaces.** Each account appears in a rail on the left, with an unread badge. Accounts never mix. Right-click an account (or open Settings ▸ Accounts) to change its color and icon, and press ⌘1–⌘9 to switch between accounts.
 - **Chats.** The sidebar lists *Starred*, *Group chats*, *Direct messages* and *Updates* (newsletters and notifications). Mail you send only to yourself goes to your own "(you)" chat.
 - **Threads.** In a chat, each email conversation is one message. Its replies collapse into "3 replies · Last reply 2 hours ago", which opens the thread in a panel on the right. Quoted text, "On … wrote:" headers (English, Czech, German, French, Spanish and more), signatures and mobile footers are stripped, so messages read cleanly.
 - **Slack-style timeline.** Avatars, names, date dividers, a red "New" line at the first unread message, and a Liquid Glass hover toolbar (reply in thread, view email, flag, more).
@@ -13,7 +13,7 @@ A simple, native macOS mail client built with SwiftUI and Liquid Glass. It works
 - **Composer.** Writing in a chat starts a new email thread to everyone in it. Unless you add a separate subject (**Aa**), the first line becomes the subject. That line is highlighted in the text, and a **SUBJECT** badge previews it. Writing in a thread sends a proper reply (`Re:`, `In-Reply-To`, `References`), so other people just see normal email. Return sends; Shift-Return adds a line.
 - **Folders.** Inbox, Sent, Archive, Trash and your own folders are still available, collapsed at the bottom of the sidebar, with a classic message list and reader.
 - **Push.** IMAP IDLE delivers new mail within seconds, with a periodic refresh as fallback.
-- **Search.** Instant local search, plus "Search on Server" for older mail (uses Gmail's own search syntax on Gmail).
+- **Search.** qMail downloads the text of every email (not attachments) in the background into a local full-text index, so the search field covers your whole mailbox: chats whose messages match, plus a list of matching emails. It ignores case and accents. Progress and disk use are in Settings ▸ General; you can turn it off there. Folders also offer "Search on Server" (Gmail's own search syntax on Gmail).
 - **Private by default.** HTML mail is rendered with JavaScript disabled and remote images blocked until you choose to load them. Passwords and tokens are stored in the Keychain.
 - **Native.** SwiftUI, Liquid Glass (glass toolbars, filter chips, composer, buttons), sandboxed, dark and light mode.
 - **No dependencies.** IMAP, SMTP (with STARTTLS), MIME, OAuth 2 (PKCE) and threading are implemented in the local `MailCore` Swift package.
@@ -120,6 +120,6 @@ Sign the dev copy with your development certificate, as above. An ad-hoc signatu
 
 ## Limitations
 
-- Each folder keeps the newest 250 messages locally by default (configurable). "Load Older Messages" and "Search on Server" reach the rest.
+- Each folder keeps the newest 250 messages locally by default (configurable). "Load Older Messages" and "Search on Server" reach the rest. The search index is separate: a SQLite FTS5 database per account (Gmail's All Mail, or every folder except Junk, Trash and Drafts elsewhere) that stores each message's own text, up to its first 100 KB.
 - Composing is plain text, with attachments. Drafts are not synced to the server.
 - Sending needs a connection; there is no offline outbox yet.

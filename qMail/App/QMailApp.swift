@@ -36,6 +36,14 @@ struct MailCommands: Commands {
             .keyboardShortcut("n")
             .disabled(store.accounts.isEmpty)
         }
+        CommandGroup(after: .sidebar) {
+            Divider()
+            // ⌘1…⌘9 switch accounts, like tabs.
+            ForEach(Array(store.accounts.prefix(9).enumerated()), id: \.element.id) { index, account in
+                Button(account.email) { navigator.accountID = account.id }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+        }
         CommandMenu("Mailbox") {
             Button("Get New Mail") {
                 Task { await store.refreshAll() }

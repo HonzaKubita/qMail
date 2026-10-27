@@ -17,6 +17,8 @@ struct ChatView: View {
     /// Unread messages when the chat was opened. Marking read happens right away, so this keeps
     /// the "New" line and "new replies" badges stable while you look.
     @State private var unreadAtOpen: Set<String>?
+    /// The chat's width with no thread open; a thread opens at half of it.
+    @State private var chatWidth: CGFloat = 0
     #if DEBUG
     @State private var debugThreadSheet: ChatThread?
     #endif
@@ -58,6 +60,10 @@ struct ChatView: View {
                 ChatComposer(target: .chat(chat))
             }
         }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width in
+            // While a thread is open the timeline is only what's left beside it.
+            if openThread == nil { chatWidth = width }
+        }
         .inspector(isPresented: Binding(get: { openThread != nil }, set: { if !$0 { openThreadID = nil } })) {
             Group {
                 if let openThread {
@@ -68,7 +74,7 @@ struct ChatView: View {
                     .id("\(openThread.id)|\(openWithReplyAll)")
                 }
             }
-            .inspectorColumnWidth(min: 320, ideal: 380, max: 620)
+            .inspectorColumnWidth(min: 320, ideal: max(320, chatWidth / 2), max: max(620, chatWidth * 0.7))
         }
         .navigationTitle(store.title(for: chat))
         .navigationSubtitle(subtitle)
@@ -378,6 +384,10 @@ struct ChatMessageRow: View {
                         .font(.body.weight(.semibold))
                 }
                 messageText
+                if let images = store.chatContents[summary.id]?.images, !images.isEmpty {
+                    ChatImageStrip(images: images) { onShowEmail(current) }
+                        .padding(.top, 2)
+                }
                 if !attachments.isEmpty {
                     Button { onShowEmail(current) } label: {
                         Label(attachments.count == 1 ? attachments[0] : "\(attachments.count) attachments", systemImage: "paperclip")
@@ -420,10 +430,18 @@ struct ChatMessageRow: View {
     private var messageText: some View {
         let isLong = text.count > Self.collapsedLength
         let display = expanded || !isLong ? text : String(text.prefix(Self.collapsedLength)) + "…"
-        if display.isEmpty {
+        let content = store.chatContents[summary.id]
+        if display.isEmpty && content == nil {
             Text("Loading…")
                 .foregroundStyle(.secondary)
                 .redacted(reason: .placeholder)
+        } else if display.isEmpty {
+            // Loaded but nothing of its own besides quotes — e.g. a reply that only adds an attachment.
+            if content?.images.isEmpty ?? true, content?.attachmentNames.isEmpty ?? true {
+                Text("No message text")
+                    .italic()
+                    .foregroundStyle(.secondary)
+            }
         } else {
             Text(LinkText.attributed(display))
                 .textSelection(.enabled)
@@ -450,51 +468,74 @@ private struct ThreadSummaryButton: View {
         var seen = Set<String>()
         let repliers = replies.compactMap(\.sender).filter { seen.insert($0.normalizedEmail).inserted }
         let newCount = thread.replyIDs.filter { unreadAtOpen.contains($0) }.count
+        let latest = replies.max { $0.date < $1.date }
         Button(action: action) {
-            HStack(spacing: 8) {
-                HStack(spacing: -6) {
-                    ForEach(Array(repliers.prefix(4))) { person in
-                        AvatarView(address: person, size: 22)
-                            .overlay(Circle().stroke(.background, lineWidth: 1.5))
+            HStack(spacing: 10) {
+                HStack(spacing: -8) {
+                    ForEach(Array(repliers.prefix(3))) { person in
+                        AvatarView(address: person, size: 28)
+                            .overlay(Circle().stroke(.background, lineWidth: 2))
                     }
                 }
-                Text(thread.replyCount == 1 ? "1 reply" : "\(thread.replyCount) replies")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(thread.replyCount == 1 ? "1 reply" : "\(thread.replyCount) replies")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.tint)
+                        if newCount > 0 {
+                            Text("\(newCount) new")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor, in: .capsule)
+                        }
+                        Text(latest.map { $0.date.formatted(.relative(presentation: .named)) } ?? "")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let latest, let preview = preview(of: latest) {
+                        Text("\(Text(latest.sender?.shortName ?? "").fontWeight(.medium)): \(preview)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.right")
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(.tint)
-                if newCount > 0 {
-                    Text("\(newCount) new")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Color.accentColor, in: .capsule)
-                }
-                Group {
-                    if hovering {
-                        Text("View thread")
-                    } else {
-                        Text("Last reply \(thread.lastDate.formatted(.relative(presentation: .named)))")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                if hovering {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+                    .foregroundStyle(hovering ? .secondary : .tertiary)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering ? Color.primary.opacity(0.07) : .clear)
-            )
-            .contentShape(.rect(cornerRadius: 8))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 560, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.09 : 0.05))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(newCount > 0 ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .padding(.leading, -6)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .help("View thread")
+        .padding(.top, 2)
+    }
+
+    /// The first line of the latest reply, or what it sent if it has no text.
+    private func preview(of summary: MessageSummary) -> String? {
+        let content = store.chatContents[summary.id]
+        let text = content?.text ?? QuoteStripper.cleanSnippet(summary.snippet)
+        let line = text.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        if !line.isEmpty { return line }
+        if let images = content?.images, !images.isEmpty {
+            return images.count == 1 ? String(localized: "Photo") : String(localized: "\(images.count) photos")
+        }
+        return content?.attachmentNames.first
     }
 }
 
@@ -837,5 +878,50 @@ enum LinkText {
             attributed[lower..<upper].underlineStyle = .single
         }
         return attributed
+    }
+}
+
+/// Inline thumbnails of the photos in a message.
+private struct ChatImageStrip: View {
+    let images: [ChatImage]
+    let onOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(images.prefix(4)) { image in
+                ChatImageThumbnail(image: image, maxHeight: images.count == 1 ? 280 : 180)
+                    .onTapGesture(perform: onOpen)
+                    .help(image.filename)
+            }
+            if images.count > 4 {
+                Button("+\(images.count - 4)", action: onOpen)
+                    .buttonStyle(.glass)
+            }
+        }
+    }
+}
+
+private struct ChatImageThumbnail: View {
+    let image: ChatImage
+    let maxHeight: CGFloat
+    @State private var nsImage: NSImage?
+
+    var body: some View {
+        let aspect = CGFloat(image.width) / CGFloat(max(image.height, 1))
+        let height = min(maxHeight, CGFloat(image.height))
+        Group {
+            if let nsImage {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle().fill(.quaternary)
+            }
+        }
+        .frame(width: min(height * aspect, 420), height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.separator, lineWidth: 0.5))
+        .contentShape(.rect)
+        .task(id: image.attachmentID) { nsImage = NSImage(data: image.data) }
     }
 }

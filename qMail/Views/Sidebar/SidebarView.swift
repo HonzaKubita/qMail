@@ -5,6 +5,7 @@ import SwiftUI
 /// Account rail plus the selected account's chats, like a Slack workspace.
 struct WorkspaceSidebar: View {
     @Environment(MailStore.self) private var store
+    @Environment(AppNavigator.self) private var navigator
     @Binding var accountID: UUID?
     @Binding var selection: SidebarItem?
     let searchText: String
@@ -13,20 +14,41 @@ struct WorkspaceSidebar: View {
     var body: some View {
         HStack(spacing: 0) {
             AccountRail(accountID: $accountID, showingAddAccount: $showingAddAccount)
+                .zIndex(1) // its hover labels overlap the chat list
             if let account = accountID.flatMap({ store.account($0) }) {
                 ChatSidebar(account: account, selection: $selection, searchText: searchText)
                     .id(account.id)
             }
         }
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
+                // While mail is loading, a spinner covers the (hidden) icon inside the same button,
+                // so the button keeps its size and its place in the toolbar's glass group.
                 Button {
+                    guard !store.isSyncing else { return }
                     Task { await store.refreshAll() }
                 } label: {
-                    Label("Get New Mail", systemImage: "arrow.clockwise")
+                    Label {
+                        Text("Get New Mail")
+                    } icon: {
+                        Image(systemName: "arrow.clockwise")
+                            .opacity(store.isSyncing ? 0 : 1)
+                            .overlay {
+                                if store.isSyncing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                    }
                 }
-                .help("Get New Mail")
-                .disabled(store.isSyncing)
+                .help(store.isSyncing ? "Getting New Mail…" : "Get New Mail")
+                Button {
+                    navigator.startNewMessage(accountID: accountID)
+                } label: {
+                    Label("New Message", systemImage: "square.and.pencil")
+                }
+                .help("New Message")
+                .disabled(accountID == nil)
             }
         }
     }
@@ -35,81 +57,154 @@ struct WorkspaceSidebar: View {
 /// Vertical strip of accounts ("workspaces") with unread badges.
 private struct AccountRail: View {
     @Environment(MailStore.self) private var store
+    @Environment(AppNavigator.self) private var navigator
+    @Environment(\.openSettings) private var openSettings
     @Binding var accountID: UUID?
     @Binding var showingAddAccount: Bool
+    @State private var hovered: UUID?
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 4) {
             ForEach(store.accounts) { account in
+                let isSelected = account.id == accountID
                 Button {
                     accountID = account.id
                 } label: {
-                    AccountTile(account: account, isSelected: account.id == accountID, unread: store.unreadCount(forAccount: account.id))
+                    AccountIcon(account: account, size: 32)
+                        .overlay(alignment: .topTrailing) {
+                            UnreadBadge(count: isSelected ? 0 : store.unreadCount(forAccount: account.id))
+                                .offset(x: 7, y: -6)
+                        }
                 }
-                .buttonStyle(.plain)
-                .help("\(account.displayName) — \(account.email)")
+                .buttonStyle(RailButtonStyle(isSelected: isSelected))
+                // Shown at once on hover (a tooltip takes a second), so same-looking accounts are easy to tell apart.
+                .onHover { inside in
+                    if inside { hovered = account.id } else if hovered == account.id { hovered = nil }
+                }
+                .overlay(alignment: .leading) {
+                    if hovered == account.id {
+                        AccountHoverLabel(account: account, unread: store.unreadCount(forAccount: account.id))
+                            .offset(x: 50)
+                            .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: hovered)
+                .accessibilityLabel(account.email)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .contextMenu {
+                    AccountAppearancePickers(account: account)
+                    Divider()
+                    Button("Get New Mail") { Task { await store.sync(accountID: account.id) } }
+                    Button("Account Settings…") {
+                        navigator.settingsAccountID = account.id
+                        openSettings()
+                    }
+                }
             }
             Button {
                 showingAddAccount = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 22, height: 22)
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 32, height: 32)
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonStyle(RailButtonStyle())
             .help("Add Account")
             Spacer()
             SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 32, height: 32)
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonStyle(RailButtonStyle())
             .help("Settings")
         }
-        .padding(.vertical, 12)
-        .frame(width: 62)
+        .padding(.vertical, 8)
+        .frame(width: 56)
+        #if DEBUG
+        .onAppear {
+            // QMAIL_HOVER_ACCOUNT=N shows the Nth account's hover label, for screenshots.
+            if let index = ProcessInfo.processInfo.environment["QMAIL_HOVER_ACCOUNT"].flatMap(Int.init),
+               store.accounts.indices.contains(index) { hovered = store.accounts[index].id }
+        }
+        #endif
     }
 }
 
-private struct AccountTile: View {
+/// The account's address next to its icon in the rail.
+private struct AccountHoverLabel: View {
     let account: Account
-    let isSelected: Bool
     let unread: Int
 
-    private var letter: String {
-        String(account.email.prefix(1)).uppercased()
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(account.email)
+                .font(.callout.weight(.medium))
+            if unread > 0 {
+                Text("\(unread) unread")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thickMaterial, in: .capsule) // keeps the list underneath from showing through
+        .glassEffect(.regular, in: .capsule)
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Borderless rail button that highlights on hover and shows the selected account
+/// the way macOS shows an inactive sidebar selection.
+private struct RailButtonStyle: ButtonStyle {
+    var isSelected = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        RailButton(configuration: configuration, isSelected: isSelected)
     }
 
+    private struct RailButton: View {
+        let configuration: ButtonStyleConfiguration
+        let isSelected: Bool
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(.secondary)
+                .padding(4)
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(fill)
+                }
+                .contentShape(.rect(cornerRadius: 10))
+                .onHover { hovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
+
+        private var fill: Color {
+            if configuration.isPressed { return .primary.opacity(0.16) }
+            if isSelected { return Color(nsColor: .unemphasizedSelectedContentBackgroundColor) }
+            return hovering ? .primary.opacity(0.07) : .clear
+        }
+    }
+}
+
+/// Red count like the Dock's.
+private struct UnreadBadge: View {
+    let count: Int
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            ProviderIcon(provider: account.provider, size: 40)
-                .overlay {
-                    // The first letter tells accounts at the same provider apart.
-                    Text(letter)
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(3)
-                        .background(.black.opacity(0.35), in: Circle())
-                        .offset(x: -13, y: 13)
-                }
-                .padding(3)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(isSelected ? Color.primary : .clear, lineWidth: 2)
-                }
-                .opacity(isSelected ? 1 : 0.75)
-            if unread > 0 && !isSelected {
-                Text(unread > 99 ? "99+" : "\(unread)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(.red, in: Capsule())
-                    .offset(x: 4, y: -4)
-            }
+        if count > 0 {
+            Text(count > 99 ? "99+" : "\(count)")
+                .font(.system(size: 10, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(.red, in: .capsule)
         }
     }
 }
@@ -125,9 +220,13 @@ private struct ChatSidebar: View {
     @State private var collapsed: Set<String> = ["folders"]
     @State private var renaming: Chat?
     @State private var newName = ""
+    /// Matches from the index of all mail, newest first.
+    @State private var messageHits: [MessageSummary] = []
+
+    private var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        let sections = store.chatSections(for: account.id, matching: searchText)
+        let sections = store.chatSections(for: account.id, matching: searchText, hits: Set(messageHits.compactMap(\.messageID)))
         VStack(spacing: 0) {
             header
             List(selection: $selection) {
@@ -150,7 +249,10 @@ private struct ChatSidebar: View {
                 chatSection("Group chats", key: "groups", chats: sections.groups)
                 chatSection("Direct messages", key: "direct", chats: sections.direct)
                 chatSection("Updates", key: "updates", chats: sections.updates)
-                if sections.isEmpty {
+                if isSearching {
+                    searchResults
+                }
+                if sections.isEmpty && (!isSearching || messageHits.isEmpty) {
                     Text(searchText.isEmpty ? (store.syncingAccounts.contains(account.id) ? "Loading conversations…" : "No conversations yet") : "No matches")
                         .foregroundStyle(.secondary)
                         .font(.callout)
@@ -168,6 +270,16 @@ private struct ChatSidebar: View {
             }
             .listStyle(.sidebar)
         }
+        .task(id: "\(account.id)|\(searchText)") {
+            let query = searchText.trimmingCharacters(in: .whitespaces)
+            guard !query.isEmpty else { messageHits = []; return }
+            try? await Task.sleep(for: .milliseconds(200)) // wait for typing to pause
+            guard !Task.isCancelled else { return }
+            let results = await store.searchAllMail(query, accountID: account.id)
+            guard !Task.isCancelled else { return }
+            var seen = Set<String>()
+            messageHits = results.filter { seen.insert($0.messageID ?? $0.id).inserted }
+        }
         .alert("Rename Chat", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Save") {
@@ -177,6 +289,39 @@ private struct ChatSidebar: View {
             Button("Cancel", role: .cancel) { renaming = nil }
         } message: {
             Text("Leave empty to use the participants' names.")
+        }
+    }
+
+    /// Individual emails matching the search, from anywhere in the mailbox.
+    @ViewBuilder
+    private var searchResults: some View {
+        let status = store.indexStatus[account.id]
+        if !messageHits.isEmpty {
+            Section {
+                ForEach(messageHits.prefix(100)) { summary in
+                    SearchResultRow(summary: summary, account: account)
+                        .tag(SidebarItem.message(summary.id))
+                }
+            } header: {
+                Text(messageHits.count > 100 ? "Messages (100 newest)" : "Messages")
+            }
+        }
+        if let status, !status.isComplete, status.total > 0 {
+            Label {
+                Text("Downloading mail for search: \(status.withText.formatted()) of \(status.total.formatted())")
+            } icon: {
+                ProgressView(value: Double(status.withText), total: Double(max(status.total, 1)))
+                    .progressViewStyle(.circular)
+                    .controlSize(.mini)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .selectionDisabled()
+        } else if status == nil, !store.settings.downloadAllMail {
+            Text("Search covers recent mail. Turn on “Download all mail for search” in Settings to search everything.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .selectionDisabled()
         }
     }
 
@@ -193,27 +338,14 @@ private struct ChatSidebar: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            if store.syncingAccounts.contains(account.id) {
-                ProgressView()
-                    .controlSize(.small)
-            } else if let error = store.accountErrors[account.id] {
+            if let error = store.accountErrors[account.id] {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .help(error)
             }
-            Button {
-                navigator.startNewMessage(accountID: account.id)
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .help("New Message")
         }
         .padding(.leading, 10)
-        .padding(.trailing, 12)
+        .padding(.trailing, 14)
         .padding(.vertical, 8)
     }
 
@@ -223,6 +355,7 @@ private struct ChatSidebar: View {
             Section(isExpanded: expansion(key)) {
                 ForEach(chats) { chat in
                     ChatSidebarRow(chat: chat, account: account)
+                        .badge(chat.isAutomated ? 0 : chat.unreadCount)
                         .tag(SidebarItem.chat(chat.id))
                         .contextMenu { contextMenu(for: chat) }
                 }
@@ -280,16 +413,44 @@ private struct ChatSidebarRow: View {
             Text(store.title(for: chat))
                 .fontWeight(isUnread ? .semibold : .regular)
                 .lineLimit(1)
-            Spacer(minLength: 4)
-            if isUnread && !chat.isAutomated {
-                Text("\(chat.unreadCount)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.red, in: Capsule())
-            }
         }
         .help(chat.participants.map(\.email).joined(separator: ", "))
+    }
+}
+
+/// A message found by search: who, when, subject and the start of the text.
+private struct SearchResultRow: View {
+    @Environment(MailStore.self) private var store
+    let summary: MessageSummary
+    let account: Account
+
+    var body: some View {
+        let fromMe = store.isOwn(summary.sender, accountID: account.id)
+        let person = fromMe ? summary.to.first : summary.sender
+        HStack(alignment: .top, spacing: 8) {
+            AvatarView(address: person, size: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(fromMe ? "To \(person?.displayName ?? "")" : person?.displayName ?? "Unknown")
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(DateText.short(summary.date))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(summary.subject.isEmpty ? "(No Subject)" : summary.subject)
+                    .font(.callout)
+                    .lineLimit(1)
+                let preview = QuoteStripper.cleanSnippet(summary.snippet)
+                if preview.contains(where: { $0.isLetter || $0.isNumber }) {
+                    Text(preview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }

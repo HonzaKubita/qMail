@@ -36,6 +36,8 @@ final class AppNavigator {
     var newMessage: NewMessageDraft?
     /// A thread a chat should open once it appears, e.g. after "Reply" in a folder.
     var pendingThread: (chatID: String, threadID: String, replyAll: Bool)?
+    /// The account Settings should show when it opens from an account's menu.
+    var settingsAccountID: UUID?
 
     func showChat(_ chatID: String, accountID: UUID, thread threadID: String? = nil, replyAll: Bool = false) {
         self.accountID = accountID

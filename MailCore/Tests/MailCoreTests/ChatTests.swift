@@ -152,7 +152,7 @@ import Testing
         #expect(QuoteStripper.strip(outlook) == "Agreed.")
 
         let onlyQuote = "> everything quoted"
-        #expect(QuoteStripper.strip(onlyQuote) == "> everything quoted")
+        #expect(QuoteStripper.strip(onlyQuote) == "everything quoted")
     }
 
     @Test func cutsHTMLQuotes() {
@@ -174,5 +174,56 @@ import Testing
         #expect(QuoteStripper.cleanSnippet("Sure thing! On Mon, Feb 3, 2025 at 9:15 AM Alice <a@x.com> wrote: > Can you") == "Sure thing!")
         #expect(QuoteStripper.cleanSnippet("Díky Dne po 3. 2. 2025 v 9:15 Alice napsal(a): > Ahoj") == "Díky")
         #expect(QuoteStripper.cleanSnippet("No quotes here") == "No quotes here")
+        #expect(QuoteStripper.cleanSnippet("On Mon 26. 10. 2026 at 19:56, Jan <jan@x.cz> wrote: > Ahoj") == "")
+        #expect(QuoteStripper.collapseRepeatedLinks("+420 725 | a@ssps.cz <mailto:a@ssps.cz> | www.ssps.cz<http://www.ssps.cz/>") == "+420 725 | a@ssps.cz | www.ssps.cz")
+        #expect(QuoteStripper.collapseRepeatedLinks("Recording of <https://youtube.com/x> is up") == "Recording of <https://youtube.com/x> is up")
+        #expect(QuoteStripper.collapseRepeatedLinks("see ssps.cz/kontakt <https://www.ssps.cz/kontakt/>.") == "see ssps.cz/kontakt.")
+    }
+}
+
+/// Reply formats seen in real mailboxes (names and addresses replaced).
+@Suite struct RealWorldQuoteTests {
+    @Test func czechGmailHeader() {
+        let text = "Díky, mám to.\n\nst 21. 10. 2026 v 3:53 odesílatel Jana Nová <jana@example.dev> napsal:\n\n> Ahoj,\n> posílám"
+        #expect(QuoteStripper.strip(text) == "Díky, mám to.")
+    }
+
+    @Test func czechGmailHeaderWrappedBeforeNapsal() {
+        let text = "Dobře, dám vědět.\n\nst 16. 9. 2026 v 11:41 odesílatel Petr Dlouhý <petr@example.cz>\nnapsal:\n\n> Dobrý den"
+        #expect(QuoteStripper.strip(text) == "Dobře, dám vědět.")
+    }
+
+    @Test func czechGmailHeaderWrappedInsideAddress() {
+        let text = "Posílám fotky.\n\nčt 10. 9. 2026 v 13:53 odesílatel Martin Krátký <\nmartin@example.cz> napsal:\n\n> Ahoj"
+        #expect(QuoteStripper.strip(text) == "Posílám fotky.")
+    }
+
+    @Test func englishGmailHeaderWrapped() {
+        let text = "Sure, works for me.\n\nOn Mon 26. 10. 2026 at 19:56, Jan Novák <jan@example.cz>\nwrote:\n\n> Can we meet?"
+        #expect(QuoteStripper.strip(text) == "Sure, works for me.")
+    }
+
+    @Test func fullyQuotedForwardIsUnquoted() {
+        let text = "> Begin forwarded message:\n>\n> From: Alice <alice@example.com>\n> Subject: Plan\n>\n> Hello there"
+        #expect(QuoteStripper.strip(text) == "Begin forwarded message:\n\nFrom: Alice <alice@example.com>\nSubject: Plan\n\nHello there")
+    }
+
+    @Test func underscoreSignature() {
+        let text = "Thanks for your time.\n______________\nJan Novák\nStudent"
+        #expect(QuoteStripper.strip(text) == "Thanks for your time.")
+    }
+
+    @Test func dropsAttachmentPlaceholders() {
+        #expect(QuoteStripper.strip("Look at this\n\u{FFFC}\nNice, right?") == "Look at this\n\nNice, right?")
+    }
+
+    @Test func dropsImageDescriptions() {
+        let text = "S pozdravem\n\n[Obsah obrázku černá, snímek obrazovky, tma  Obsah generovaný pomocí AI může být nesprávný.]\n[image: logo.png]\nPhDr. Jana Nová"
+        #expect(QuoteStripper.strip(text) == "S pozdravem\n\nPhDr. Jana Nová")
+    }
+
+    @Test func czechHeaderInSnippet() {
+        let snippet = "Ale třeba se využijí do prezentace. čt 10. 9. 2026 v 13:53 odesílatel Martin Krátký < martin@example.cz> napsal: > Ahoj"
+        #expect(QuoteStripper.cleanSnippet(snippet) == "Ale třeba se využijí do prezentace.")
     }
 }

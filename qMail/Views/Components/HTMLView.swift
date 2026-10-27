@@ -39,6 +39,7 @@ struct HTMLView: NSViewRepresentable {
           html { -webkit-text-size-adjust: none; background: #fff; color: #1d1d1f; }
           body { margin: 16px 20px; font: 14px -apple-system, system-ui, sans-serif; word-wrap: break-word; }
           img { max-width: 100%; height: auto; }
+          img[src="data:,"] { display: none; }
           pre, code { white-space: pre-wrap; }
           blockquote { margin-left: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,.35); color: rgba(127,127,127,1); }
         </style>
@@ -79,17 +80,28 @@ struct HTMLView: NSViewRepresentable {
             || lower.contains("src=http") || lower.contains("background=\"http")
     }
 
-    /// Replaces `cid:` references with inline data URLs for embedded images.
+    /// Replaces `cid:` references with inline data URLs for embedded images, and blanks out
+    /// references to parts the message doesn't contain (some senders drop the images but keep
+    /// the `<img>` tags), so they don't render as broken images.
     static func inlineImages(_ html: String, attachments: [MailAttachment]) -> String {
         var result = html
         for attachment in attachments where attachment.contentID != nil && attachment.data.count < 8_000_000 {
             let cid = attachment.contentID!
-            guard result.contains("cid:\(cid)") else { continue }
             let dataURL = "data:\(attachment.mimeType);base64,\(attachment.data.base64EncodedString())"
-            result = result.replacingOccurrences(of: "cid:\(cid)", with: dataURL)
+            result = result.replacingOccurrences(of: "cid:\(cid)", with: dataURL, options: .caseInsensitive)
+            // Apple Mail sometimes references parts by bare ID, without "cid:".
+            result = result.replacingOccurrences(of: "src=\"\(cid)\"", with: "src=\"\(dataURL)\"", options: .caseInsensitive)
         }
-        return result
+        return missingImageSource.stringByReplacingMatches(
+            in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "$1data:,$2"
+        )
     }
+
+    /// `src` values that can't load: leftover `cid:` references and bare relative IDs.
+    private static let missingImageSource = try! NSRegularExpression(
+        pattern: #"(<img\b[^>]*?\bsrc\s*=\s*["'])(?:cid:[^"']*|[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{20,}[^"']*)(["'])"#,
+        options: [.caseInsensitive]
+    )
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {

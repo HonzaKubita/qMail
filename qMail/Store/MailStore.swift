@@ -7,6 +7,8 @@ enum SidebarItem: Hashable, Codable {
     case chat(String)
     case mailbox(String)
     case newMessage
+    /// A search result: opens in its chat, or as an email if it isn't in one.
+    case message(String)
 }
 
 /// A workspace's chats grouped the way the sidebar shows them.
@@ -23,6 +25,7 @@ struct ChatSections {
 struct ChatContent: Sendable {
     var text: String
     var attachmentNames: [String]
+    var images: [ChatImage] = []
 }
 
 /// App-wide state: accounts, cached mail, chats, and all server interaction.
@@ -45,6 +48,8 @@ final class MailStore {
     /// OAuth accounts whose sign-in expired or was revoked.
     private(set) var accountsNeedingSignIn: Set<UUID> = []
     private(set) var folderStates: [String: FolderState] = [:]
+    /// How much of each account's mail is downloaded for search.
+    private(set) var indexStatus: [UUID: IndexStatus] = [:]
     var chatPreferences = ChatPreferences.load() {
         didSet { chatPreferences.save() }
     }
@@ -63,6 +68,8 @@ final class MailStore {
     @ObservationIgnored private var saveTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var lastFullSync: Date?
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var searchIndexes: [UUID: SearchIndex] = [:]
+    @ObservationIgnored private var indexTasks: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Lifecycle
 
@@ -70,6 +77,7 @@ final class MailStore {
         guard !started else { return }
         started = true
         accounts = Persistence.loadAccounts()
+        assignDefaultTints()
         for account in accounts {
             let accountID = account.id
             if let cache = await Task.detached(operation: { Persistence.loadCache(accountID) }).value {
@@ -80,6 +88,7 @@ final class MailStore {
         }
         rebuildChats()
         isLoaded = true
+        await refreshIndexStatus()
         #if DEBUG
         await installTestAccountIfRequested()
         #endif
@@ -139,7 +148,7 @@ final class MailStore {
 
     func messages(for item: SidebarItem) -> [MessageSummary] {
         switch item {
-        case .chat, .newMessage: []
+        case .chat, .newMessage, .message: []
         case .mailbox(let id): messages[id] ?? []
         }
     }
@@ -149,6 +158,7 @@ final class MailStore {
         case .chat(let id): chat(id: id).map { title(for: $0) } ?? "Chat"
         case .mailbox(let id): mailbox(id: id)?.displayName ?? "Mailbox"
         case .newMessage: "New Message"
+        case .message(let id): summaryIndex[id]?.subject ?? "Message"
         }
     }
 
@@ -156,7 +166,7 @@ final class MailStore {
         switch item {
         case .chat(let id): chat(id: id)?.unreadCount ?? 0
         case .mailbox: messages(for: item).reduce(0) { $0 + ($1.isSeen ? 0 : 1) }
-        case .newMessage: 0
+        case .newMessage, .message: 0
         }
     }
 
@@ -216,10 +226,11 @@ final class MailStore {
         }
     }
 
-    func chatSections(for accountID: UUID, matching query: String = "") -> ChatSections {
+    /// `hits` are Message-IDs the full-mail search found, so chats match on any message's text.
+    func chatSections(for accountID: UUID, matching query: String = "", hits: Set<String> = []) -> ChatSections {
         let query = query.trimmingCharacters(in: .whitespaces)
         var sections = ChatSections()
-        for chat in visibleChats(for: accountID) where query.isEmpty || matches(chat, query) {
+        for chat in visibleChats(for: accountID) where query.isEmpty || matches(chat, query, hits: hits) {
             if chatPreferences.pinned.contains(chat.id) {
                 sections.starred.append(chat)
             } else if chat.isAutomated {
@@ -233,7 +244,7 @@ final class MailStore {
         return sections
     }
 
-    private func matches(_ chat: Chat, _ query: String) -> Bool {
+    private func matches(_ chat: Chat, _ query: String, hits: Set<String>) -> Bool {
         title(for: chat).localizedCaseInsensitiveContains(query)
             || chat.subjects.contains { $0.localizedCaseInsensitiveContains(query) }
             || chat.participants.contains {
@@ -241,6 +252,7 @@ final class MailStore {
             }
             || chat.messageIDs.contains { id in
                 (chatContents[id]?.text ?? summaryIndex[id]?.snippet ?? "").localizedCaseInsensitiveContains(query)
+                    || summaryIndex[id]?.messageID.map(hits.contains) ?? false
             }
     }
 
@@ -370,9 +382,12 @@ final class MailStore {
         let parsed = await Task.detached(priority: .userInitiated) {
             input.mapValues { data -> ChatContent in
                 let message = ParsedMessage(data: data)
+                let images = ChatImages.extract(from: message)
+                let shown = Set(images.map(\.attachmentID))
                 return ChatContent(
                     text: QuoteStripper.chatText(for: message),
-                    attachmentNames: message.visibleAttachments.map(\.filename)
+                    attachmentNames: message.visibleAttachments.filter { !shown.contains($0.id) }.map(\.filename),
+                    images: images
                 )
             }
         }.value
@@ -449,6 +464,7 @@ final class MailStore {
             accountErrors[accountID] = nil
             accountsNeedingSignIn.remove(accountID)
             startIdle(for: account)
+            startIndexing(account)
         } catch {
             accountErrors[accountID] = error.localizedDescription
             if Self.requiresSignIn(error, account: account) { accountsNeedingSignIn.insert(accountID) }
@@ -461,7 +477,7 @@ final class MailStore {
     func refreshIfStale(_ item: SidebarItem) async {
         let targets: [Mailbox]
         switch item {
-        case .chat, .newMessage: return
+        case .chat, .newMessage, .message: return
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         for mailbox in targets {
@@ -565,7 +581,7 @@ final class MailStore {
     func searchOnServer(_ item: SidebarItem, query: String) async -> [MessageSummary] {
         let targets: [Mailbox]
         switch item {
-        case .chat, .newMessage: return []
+        case .chat, .newMessage, .message: return []
         case .mailbox(let id): targets = mailbox(id: id).map { [$0] } ?? []
         }
         var results: [MessageSummary] = []
@@ -586,6 +602,118 @@ final class MailStore {
             }
         }
         return results.sorted { $0.date > $1.date }
+    }
+
+    // MARK: - Full-mail search
+
+    /// Newest messages anywhere in the account matching every word of `query`, from the local index.
+    func searchAllMail(_ query: String, accountID: UUID, limit: Int = 200) async -> [MessageSummary] {
+        guard FileManager.default.fileExists(atPath: Persistence.searchIndexURL(accountID).path) else { return [] }
+        let results = await searchIndex(for: accountID).search(query, limit: limit)
+        for summary in results where summaryIndex[summary.id] == nil { summaryIndex[summary.id] = summary }
+        return results
+    }
+
+    /// Turns background downloading of all mail on or off.
+    func updateIndexing() {
+        if settings.downloadAllMail {
+            for account in accounts { startIndexing(account) }
+        } else {
+            for task in indexTasks.values { task.cancel() }
+        }
+    }
+
+    func refreshIndexStatus() async {
+        for account in accounts where FileManager.default.fileExists(atPath: Persistence.searchIndexURL(account.id).path) {
+            var status = await searchIndex(for: account.id).status()
+            status.isRunning = indexTasks[account.id] != nil
+            indexStatus[account.id] = status
+        }
+    }
+
+    private func searchIndex(for accountID: UUID) -> SearchIndex {
+        if let existing = searchIndexes[accountID] { return existing }
+        let index = SearchIndex(url: Persistence.searchIndexURL(accountID))
+        searchIndexes[accountID] = index
+        return index
+    }
+
+    /// Gmail's All Mail already holds everything but spam and trash; elsewhere, every real folder.
+    private func foldersToIndex(_ accountID: UUID) -> [Mailbox] {
+        let list = mailboxes[accountID] ?? []
+        if let all = list.first(where: { $0.role == .all }) { return [all] }
+        return list.filter { ![.junk, .trash, .drafts].contains($0.role) }
+    }
+
+    /// Downloads, on its own connection, the headers and then the text of every message not yet indexed.
+    /// Runs after each sync, so it resumes where it stopped and picks up new mail.
+    private func startIndexing(_ account: Account) {
+        guard settings.downloadAllMail, indexTasks[account.id] == nil else { return }
+        let accountID = account.id
+        let index = searchIndex(for: accountID)
+        let folders = foldersToIndex(accountID)
+        let client = IMAPClient(endpoint: account.imap, authProvider: authProvider(for: account))
+        indexStatus[accountID, default: IndexStatus()].isRunning = true
+        indexTasks[accountID] = Task(priority: .utility) { [weak self] in
+            do {
+                try await self?.index(folders, accountID: accountID, into: index, using: client)
+            } catch {
+                // Picks up again after the next sync.
+            }
+            await client.disconnect()
+            guard let self else { return }
+            self.indexTasks[accountID] = nil
+            var status = await index.status()
+            status.isRunning = false
+            self.indexStatus[accountID] = status
+        }
+    }
+
+    private func index(_ folders: [Mailbox], accountID: UUID, into index: SearchIndex, using client: IMAPClient) async throws {
+        func publish() async {
+            var status = await index.status()
+            status.isRunning = true
+            indexStatus[accountID] = status
+        }
+        await index.keepFolders(Set(folders.map(\.path)))
+
+        // Headers first: subject and people become searchable quickly.
+        for folder in folders {
+            let path = folder.path
+            let info = try await client.select(path)
+            await index.prepareFolder(path, validity: info.uidValidity, total: info.exists)
+            let onServer = try await client.allUIDs(in: path)
+            let known = await index.indexedUIDs(in: path)
+            await index.removeUIDs(Array(known.subtracting(onServer)), in: path)
+            let missing = onServer.filter { !known.contains($0) }.sorted(by: >)
+            await publish()
+            for batch in missing.chunked(into: 300) {
+                guard !Task.isCancelled else { return }
+                let fetched = try await client.fetchSummaries(in: path, uids: batch)
+                let summaries = await Task.detached {
+                    fetched.map { MessageSummary(fetched: $0, accountID: accountID, mailboxPath: path) }
+                }.value
+                await index.add(summaries)
+                await publish()
+            }
+        }
+
+        // Then the text of each message, newest first; large ones only up to their first 100 KB.
+        while !Task.isCancelled {
+            let pending = await index.messagesNeedingText(limit: 200)
+            if pending.isEmpty { break }
+            for (path, group) in Dictionary(grouping: pending, by: \.path) {
+                for batch in group.map(\.uid).chunked(into: 40) {
+                    guard !Task.isCancelled else { return }
+                    let fetched = try await client.fetchTextPreviews(in: path, uids: batch, maxBytes: 100_000)
+                    let texts = await Task.detached {
+                        Dictionary(fetched.map { ($0.uid, $0.searchableText) }) { first, _ in first }
+                    }.value
+                    await index.setText(texts, in: path, missing: batch.filter { texts[$0] == nil })
+                    await publish()
+                }
+            }
+        }
     }
 
     // MARK: - Reading
@@ -819,6 +947,7 @@ final class MailStore {
         account.colorIndex = (accounts.map(\.colorIndex).max() ?? -1) + 1
         try await credentials.save(secret, for: account.id)
         accounts.append(account)
+        assignDefaultTints()
         Persistence.saveAccounts(accounts)
         Task { await sync(accountID: account.id) }
     }
@@ -836,8 +965,33 @@ final class MailStore {
         }
     }
 
+    /// Changes how an account looks in the account rail; no resync needed.
+    func setAppearance(of accountID: UUID, tint: String? = nil, symbol: String? = nil) {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
+        if let tint { accounts[index].tint = tint }
+        if let symbol { accounts[index].symbol = symbol }
+        Persistence.saveAccounts(accounts)
+    }
+
+    /// Gives each account without a color its provider's color, or the next free one,
+    /// so two accounts at the same provider don't look alike.
+    private func assignDefaultTints() {
+        var changed = false
+        for index in accounts.indices where accounts[index].tint == nil {
+            let used = Set(accounts.compactMap(\.tint))
+            let brand = AccountTint.brand(of: accounts[index].provider)
+            let tint = used.contains(brand.rawValue) ? AccountTint.allCases.first { !used.contains($0.rawValue) } ?? brand : brand
+            accounts[index].tint = tint.rawValue
+            changed = true
+        }
+        if changed { Persistence.saveAccounts(accounts) }
+    }
+
     func removeAccount(_ accountID: UUID) {
         dropClients(for: accountID)
+        indexTasks.removeValue(forKey: accountID)?.cancel()
+        searchIndexes[accountID] = nil
+        indexStatus[accountID] = nil
         accounts.removeAll { $0.id == accountID }
         Persistence.saveAccounts(accounts)
         for mailbox in mailboxes[accountID] ?? [] {

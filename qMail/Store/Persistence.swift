@@ -53,9 +53,25 @@ enum Persistence {
         try? data.write(to: cacheURL(accountID), options: .atomic)
     }
 
+    /// SQLite full-text index of all the account's mail.
+    static func searchIndexURL(_ accountID: UUID) -> URL {
+        baseURL.appending(path: "search-\(accountID.uuidString).sqlite")
+    }
+
+    /// Bytes the search index takes on disk.
+    static func searchIndexSize(_ accountID: UUID) -> Int64 {
+        ["", "-wal", "-shm"].reduce(0) { total, suffix in
+            let path = searchIndexURL(accountID).path + suffix
+            return total + ((try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0)
+        }
+    }
+
     static func deleteData(for accountID: UUID) {
         try? FileManager.default.removeItem(at: cacheURL(accountID))
         try? FileManager.default.removeItem(at: bodiesURL(accountID))
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: searchIndexURL(accountID).path + suffix)
+        }
     }
 
     // MARK: Message bodies

@@ -192,3 +192,12 @@ public struct FetchedMessage: Sendable {
         self.sequence = sequence
     }
 }
+
+extension FetchedMessage {
+    /// The message's own text (quotes and signatures removed) from its header and body preview, for search.
+    public var searchableText: String {
+        guard let preview = previewData, !preview.isEmpty else { return "" }
+        let headers = MIMEHeaders.parse(headerData ?? Data())
+        return QuoteStripper.chatText(for: ParsedMessage(root: MIMEParser.parseBody(preview, headers: headers)))
+    }
+}

@@ -187,6 +187,28 @@ public actor IMAPClient {
         }
     }
 
+    /// Every UID in a mailbox, for finding which messages a local index is missing.
+    public func allUIDs(in path: String) async throws -> [UInt32] {
+        try await serialized {
+            try await self.selectIfNeeded(path)
+            let result = try await self.execute("UID SEARCH ALL")
+            return result.untagged.flatMap { response -> [UInt32] in
+                if case .search(let uids) = response { return uids }
+                return []
+            }
+        }
+    }
+
+    /// Headers plus the first `maxBytes` of each body: the text of nearly any email, usually without its attachments.
+    public func fetchTextPreviews(in path: String, uids: [UInt32], maxBytes: Int) async throws -> [FetchedMessage] {
+        guard !uids.isEmpty else { return [] }
+        return try await serialized {
+            try await self.selectIfNeeded(path)
+            let result = try await self.execute("UID FETCH \(Self.uidSet(uids)) (UID BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.\(maxBytes)>)")
+            return Self.fetchedMessages(from: result.untagged)
+        }
+    }
+
     /// Server-side search; returns matching UIDs.
     public func search(in path: String, text: String) async throws -> [UInt32] {
         try await serialized {

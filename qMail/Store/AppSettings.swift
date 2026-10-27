@@ -10,16 +10,20 @@ final class AppSettings {
     var refreshMinutes: Int { didSet { defaults.set(refreshMinutes, forKey: "refreshMinutes") } }
     var loadRemoteContent: Bool { didSet { defaults.set(loadRemoteContent, forKey: "loadRemoteContent") } }
     var messagesPerFolder: Int { didSet { defaults.set(messagesPerFolder, forKey: "messagesPerFolder") } }
+    /// Download every message's text in the background so search covers the whole mailbox.
+    var downloadAllMail: Bool { didSet { defaults.set(downloadAllMail, forKey: "downloadAllMail") } }
 
     init() {
         defaults.register(defaults: [
             "refreshMinutes": 5,
             "loadRemoteContent": false,
             "messagesPerFolder": 250,
+            "downloadAllMail": true,
         ])
         refreshMinutes = defaults.integer(forKey: "refreshMinutes")
         loadRemoteContent = defaults.bool(forKey: "loadRemoteContent")
         messagesPerFolder = defaults.integer(forKey: "messagesPerFolder")
+        downloadAllMail = defaults.bool(forKey: "downloadAllMail")
     }
 }
 

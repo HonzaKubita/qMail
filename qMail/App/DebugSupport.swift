@@ -16,7 +16,10 @@ import SwiftUI
 ///   QMAIL_SELECT=new           open New Message (QMAIL_NEW_TO=a@b.c,… prefills recipients)
 ///   QMAIL_SELECT=reply:N       Reply All from the Nth inbox message, or reply:Subject words (opens its chat thread)
 ///   QMAIL_REPLY_ALL=text       with reply:…, send a reply to everyone and follow it, like the bottom bar does
-///   QMAIL_SELECT=setup|settings  show the add-account sheet or the Settings window
+///   QMAIL_SELECT=setup|settings[:accounts]  show the add-account sheet or the Settings window
+///   QMAIL_RESYNC=N             get new mail again N seconds after launch
+///   QMAIL_SEARCH=text          type text into the search field
+///   QMAIL_HOVER_ACCOUNT=N      show the Nth account's hover label in the rail
 ///   QMAIL_SNAPSHOT=1           after a few seconds, write each window as base64 PNG to stderr
 ///                              (works while the screen is locked; Liquid Glass isn't drawn)
 extension MailStore {
@@ -103,6 +106,7 @@ struct DebugSelection: ViewModifier {
     func body(content: Content) -> some View {
         content
             .task { await snapshotIfRequested(store) }
+            .task { await runMailAuditIfRequested(store) }
             .task {
             guard let spec = ProcessInfo.processInfo.environment["QMAIL_SELECT"] else { return }
             let parts = spec.split(separator: ":")
@@ -112,12 +116,24 @@ struct DebugSelection: ViewModifier {
                 return
             }
             if parts.first == "settings" {
+                if parts.count > 1, parts[1] == "accounts" { navigator.settingsAccountID = store.accounts.last?.id }
                 openSettings()
                 return
             }
             for _ in 0..<40 {
                 let sections = store.accounts.first.map { store.chatSections(for: $0.id) } ?? ChatSections()
                 let chats = sections.starred + sections.groups + sections.direct + sections.updates
+                // msg:<end of summary ID> opens the chat containing that message (IDs as printed by QMAIL_AUDIT).
+                if parts.first == "msg", parts.count > 1, !chats.isEmpty {
+                    let suffix = spec.dropFirst(4)
+                    if let summary = store.summaryIndex.values.first(where: { $0.id.hasSuffix(suffix) }),
+                       let (chat, _) = store.chatAndThread(containing: summary) {
+                        navigator.accountID = chat.accountID
+                        try? await Task.sleep(for: .milliseconds(100))
+                        navigator.selection = .chat(chat.id)
+                    }
+                    return
+                }
                 if parts.first == "new", let account = store.accounts.first, !chats.isEmpty {
                     let recipients = MailAddress.parseList(ProcessInfo.processInfo.environment["QMAIL_NEW_TO"] ?? "")
                     navigator.startNewMessage(accountID: account.id, to: recipients)
@@ -177,5 +193,98 @@ struct DebugSelection: ViewModifier {
             }
         }
     }
+}
+#endif
+
+#if DEBUG
+/// QMAIL_AUDIT=N: reads the N most recent chat messages per account (without marking them read)
+/// and reports quote-stripping leftovers and how HTML emails reference images. Output goes to stderr.
+/// QMAIL_AUDIT_TAGS=<ID suffix> also lists that message's <img> sources and image parts;
+/// QMAIL_AUDIT_SUBJECT=<subject> prints the raw and chat text of messages with that subject.
+@MainActor
+func runMailAuditIfRequested(_ store: MailStore) async {
+    guard let raw = ProcessInfo.processInfo.environment["QMAIL_AUDIT"] else { return }
+    let limit = Int(raw) ?? 150
+    for _ in 0..<60 where store.chats.isEmpty { try? await Task.sleep(for: .milliseconds(500)) }
+    try? await Task.sleep(for: .seconds(3))
+    func log(_ line: String) { FileHandle.standardError.write(Data((line + "\n").utf8)) }
+
+    let quoteLine = try! NSRegularExpression(
+        pattern: #"(wrote|napsal|napsala|odesílatel|schrieb|a écrit|escribió|ha scritto|schreef|skrev)\s*:?\s*$|^\s*>|^\s*\*?(from|od|von|de)\s*:\*?\s|original message|původní zpráva|^_{8,}"#,
+        options: [.caseInsensitive])
+    let imgSrc = try! NSRegularExpression(pattern: #"<img\b[^>]*?\bsrc\s*=\s*(["']?)([^"'\s>]+)\1"#, options: [.caseInsensitive])
+    func matches(_ line: String) -> Bool {
+        quoteLine.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
+    }
+
+    log("AUDIT-BEGIN accounts=\(store.accounts.count)")
+    for account in store.accounts {
+        let ids = Set(store.chats.filter { $0.accountID == account.id && !$0.isAutomated }.flatMap(\.messageIDs))
+        let summaries = ids.compactMap { store.summary(id: $0) }.filter { !store.isPending($0) }
+            .sorted { $0.date > $1.date }.prefix(limit)
+        log("ACCOUNT \(account.email) checking=\(summaries.count)")
+        var snippetIssues = 0, quoteIssues = 0, imageMails = 0
+        for summary in summaries {
+            let tag = String(summary.id.suffix(6))
+            let snippet = QuoteStripper.cleanSnippet(summary.snippet)
+            if snippet.range(of: #"(wrote:|napsal|odesílatel|> )"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                snippetIssues += 1
+                log("SNIPPET \(tag): …\(snippet.suffix(160))")
+            }
+            guard let parsed = try? await store.loadMessage(summary) else { log("LOADFAIL \(tag)"); continue }
+            let source = (parsed.textBody?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? "text" : "html"
+            let text = QuoteStripper.chatText(for: parsed)
+            if let subject = ProcessInfo.processInfo.environment["QMAIL_AUDIT_SUBJECT"], summary.subject == subject {
+                log("TEXT \(tag) source=\(source) mailbox=\(summary.mailboxPath) plain=\((parsed.textBody ?? "-").debugDescription.prefix(120)) chat=\(text.debugDescription.prefix(120))")
+            }
+            let lines = text.components(separatedBy: "\n")
+            let bad = lines.indices.filter { matches(lines[$0]) }
+            if !bad.isEmpty {
+                quoteIssues += 1
+                log("QUOTE \(tag) source=\(source) lines=\(lines.count) client=\(parsed.headers["X-Mailer"] ?? parsed.headers["User-Agent"] ?? "?")")
+                for index in bad.prefix(3) {
+                    let context = lines[max(0, index - 1)...min(lines.count - 1, index + 1)].map { "    | " + $0.prefix(140) }
+                    log(context.joined(separator: "\n"))
+                }
+            }
+            if let html = parsed.htmlBody {
+                let range = NSRange(html.startIndex..., in: html)
+                let sources = imgSrc.matches(in: html, range: range).compactMap { Range($0.range(at: 2), in: html).map { String(html[$0]) } }
+                let imageAttachments = parsed.attachments.filter { $0.mimeType.hasPrefix("image/") }
+                guard !sources.isEmpty || !imageAttachments.isEmpty else { continue }
+                imageMails += 1
+                let cids = sources.filter { $0.lowercased().hasPrefix("cid:") }
+                let ids = Set(parsed.attachments.compactMap { $0.contentID?.lowercased() })
+                let unmatched = cids.filter { !ids.contains(String($0.dropFirst(4)).lowercased().removingPercentEncoding ?? "") }
+                let remote = sources.filter { $0.lowercased().hasPrefix("http") }
+                let protocolRelative = sources.filter { $0.hasPrefix("//") }
+                let data = sources.filter { $0.lowercased().hasPrefix("data:") }
+                let other = sources.count - cids.count - remote.count - protocolRelative.count - data.count
+                let quotedURL = html.range(of: #"url\(\s*['"]?\s*(https?:)?//"#, options: .regularExpression) != nil
+                log("IMAGES \(tag) src=\(sources.count) cid=\(cids.count) cidUnmatched=\(unmatched.count) remote=\(remote.count) protoRel=\(protocolRelative.count) data=\(data.count) other=\(other) cssURL=\(quotedURL) detectedRemote=\(HTMLView.hasRemoteContent(html)) imageAttachments=\(imageAttachments.count) inline=\(imageAttachments.filter(\.isInline).count) chatThumbnails=\(ChatImages.extract(from: parsed).count)")
+                for cid in unmatched.prefix(2) { log("    unmatched \(cid.prefix(80)) ids=\(ids.prefix(3).joined(separator: ","))") }
+                if ProcessInfo.processInfo.environment["QMAIL_AUDIT_TAGS"].map({ tag.hasSuffix($0) }) ?? false {
+                    let tags = try! NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive)
+                        .matches(in: html, range: range).compactMap { Range($0.range, in: html).map { String(html[$0]) } }
+                    for found in tags { log("    tag " + (found.range(of: #"src=\S{0,80}"#, options: .regularExpression).map { String(found[$0]) } ?? "no-src").replacingOccurrences(of: "\n", with: " ")) }
+                    for attachment in parsed.attachments where attachment.mimeType.hasPrefix("image/") {
+                        log("    part \(attachment.mimeType) \(attachment.filename) bytes=\(attachment.data.count) cid=\(attachment.contentID ?? "-")")
+                    }
+                }
+                if !unmatched.isEmpty || other > 0 {
+                    func dump(_ part: MIMEPart, _ depth: Int) {
+                        let disposition = part.headers["Content-Disposition"].map { String($0.prefix(40)) } ?? "-"
+                        log("    tree " + String(repeating: "  ", count: depth) + "\(part.mimeType) enc=\(part.transferEncoding) disp=\(disposition) cid=\(part.contentID ?? "-") bytes=\(part.body.count) params=\(part.parameters.keys.sorted())")
+                        part.children.forEach { dump($0, depth + 1) }
+                    }
+                    log("    top Content-Type: \(parsed.headers["Content-Type"]?.prefix(120) ?? "-")")
+                    dump(parsed.root, 0)
+                }
+                if other > 0 { log("    other: \(sources.filter { !$0.lowercased().hasPrefix("cid:") && !$0.lowercased().hasPrefix("http") && !$0.hasPrefix("//") && !$0.lowercased().hasPrefix("data:") }.prefix(2).map { String($0.prefix(60)) })") }
+            }
+        }
+        log("SUMMARY \(account.email) snippetIssues=\(snippetIssues) quoteIssues=\(quoteIssues) imageMails=\(imageMails)")
+    }
+    log("AUDIT-END")
 }
 #endif

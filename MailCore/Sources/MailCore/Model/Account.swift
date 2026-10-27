@@ -125,6 +125,10 @@ public struct Account: Codable, Hashable, Sendable, Identifiable {
     public var aliases: [String]
     public var saveSentCopy: Bool
     public var colorIndex: Int
+    /// Name of the color the account is shown in (the app maps it to a system color); nil until assigned.
+    public var tint: String?
+    /// SF Symbol for the account's icon; nil uses the provider's.
+    public var symbol: String?
 
     public init(
         id: UUID = UUID(), displayName: String, email: String, provider: MailProvider, imap: ServerEndpoint,

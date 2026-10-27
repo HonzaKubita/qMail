@@ -2,16 +2,24 @@ import MailCore
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(AppNavigator.self) private var navigator
+    @State private var tab = "general"
+
     var body: some View {
-        TabView {
-            Tab("General", systemImage: "gearshape") {
+        TabView(selection: $tab) {
+            Tab("General", systemImage: "gearshape", value: "general") {
                 GeneralSettingsView()
             }
-            Tab("Accounts", systemImage: "at") {
+            Tab("Accounts", systemImage: "at", value: "accounts") {
                 AccountsSettingsView()
             }
         }
         .frame(width: 600)
+        // "Account Settings…" in an account's menu opens straight to that account.
+        .onAppear { if navigator.settingsAccountID != nil { tab = "accounts" } }
+        .onChange(of: navigator.settingsAccountID) { _, id in
+            if id != nil { tab = "accounts" }
+        }
     }
 }
 
@@ -38,6 +46,19 @@ private struct GeneralSettingsView: View {
                 Toggle("Load remote images automatically", isOn: $settings.loadRemoteContent)
             }
             Section {
+                Toggle("Download all mail for search", isOn: $settings.downloadAllMail)
+                    .onChange(of: settings.downloadAllMail) { store.updateIndexing() }
+                ForEach(store.accounts) { account in
+                    if let status = store.indexStatus[account.id], status.total > 0 {
+                        IndexStatusRow(account: account, status: status)
+                    }
+                }
+            } header: {
+                Text("Search")
+            } footer: {
+                Text("Downloads the text of every email (not attachments) in the background, so search covers your whole mailbox, not just recent mail. Search ignores accents, so “zamestnanec” finds “zaměstnanec”.")
+            }
+            Section {
                 LabeledContent("Hidden chats") {
                     Button("Show All (\(store.chatPreferences.hidden.count))") { store.unhideAllChats() }
                         .disabled(store.chatPreferences.hidden.isEmpty)
@@ -50,11 +71,45 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minHeight: 380)
+        .task { await store.refreshIndexStatus() }
+    }
+}
+
+/// Download progress of one account's search index.
+private struct IndexStatusRow: View {
+    let account: Account
+    let status: IndexStatus
+
+    var body: some View {
+        LabeledContent {
+            VStack(alignment: .trailing, spacing: 4) {
+                if status.isComplete {
+                    Text("\(status.total.formatted()) messages")
+                } else {
+                    ProgressView(value: Double(status.withText), total: Double(status.total))
+                        .frame(width: 160)
+                    Text("\(status.withText.formatted()) of \(status.total.formatted())\(status.isRunning ? "" : " · paused")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                AccountIcon(account: account, size: 20)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(account.email)
+                    Text(ByteCountFormatter.string(fromByteCount: Persistence.searchIndexSize(account.id), countStyle: .file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
 private struct AccountsSettingsView: View {
     @Environment(MailStore.self) private var store
+    @Environment(AppNavigator.self) private var navigator
     @State private var selection: UUID?
     @State private var showingAdd = false
 
@@ -64,7 +119,7 @@ private struct AccountsSettingsView: View {
                 List(selection: $selection) {
                     ForEach(store.accounts) { account in
                         HStack(spacing: 8) {
-                            ProviderIcon(provider: account.provider, size: 24)
+                            AccountIcon(account: account, size: 24)
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(account.displayName).lineLimit(1)
                                 Text(account.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -100,7 +155,10 @@ private struct AccountsSettingsView: View {
         }
         .frame(height: 440)
         .sheet(isPresented: $showingAdd) { AccountSetupView() }
-        .onAppear { selection = selection ?? store.accounts.first?.id }
+        .onAppear { selection = navigator.settingsAccountID ?? selection ?? store.accounts.first?.id }
+        .onChange(of: navigator.settingsAccountID) { _, id in
+            if let id { selection = id }
+        }
     }
 }
 
@@ -115,12 +173,15 @@ private struct AccountDetailForm: View {
             Section {
                 TextField("Your name", text: $account.displayName)
                 LabeledContent("Email", value: account.email)
-                TextField("Aliases", text: $aliases, prompt: Text("other@example.com, …"))
+                TextField("Aliases", text: $aliases, prompt: Text(verbatim: "other@example.com, …"))
                 Toggle("Save sent messages to the Sent folder", isOn: $account.saveSentCopy)
             } footer: {
                 Text(account.provider.savesSentMessages
                      ? "\(account.provider.displayName) files sent messages automatically, so this is usually off."
                      : "Turn off if sent messages appear twice in Sent.")
+            }
+            Section("Appearance") {
+                AccountAppearancePickers(account: account, inForm: true)
             }
             Section("Servers") {
                 LabeledContent("Incoming", value: "\(account.imap.host):\(account.imap.port) · \(account.imap.security.label)")
@@ -146,6 +207,11 @@ private struct AccountDetailForm: View {
     }
 
     private func save() {
+        // Color and icon apply as soon as they're picked; keep those.
+        if let current = store.account(account.id) {
+            account.tint = current.tint
+            account.symbol = current.symbol
+        }
         account.aliases = aliases
             .split(whereSeparator: { $0 == "," || $0 == " " })
             .map { $0.trimmingCharacters(in: .whitespaces) }

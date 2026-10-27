@@ -54,6 +54,15 @@ struct RootView: View {
             }
         }
         .onAppear(perform: validate)
+        #if DEBUG
+        .onAppear { if let query = ProcessInfo.processInfo.environment["QMAIL_SEARCH"] { searchText = query } }
+        .task {
+            // QMAIL_RESYNC=N gets new mail again N seconds after launch, to see the toolbar while it loads.
+            guard let delay = ProcessInfo.processInfo.environment["QMAIL_RESYNC"].flatMap(Double.init) else { return }
+            try? await Task.sleep(for: .seconds(delay))
+            await store.refreshAll()
+        }
+        #endif
         .onChange(of: store.accounts) { validate() }
         .onChange(of: store.chats) { followMovedChat() }
         #if DEBUG
@@ -74,6 +83,18 @@ struct RootView: View {
         case .mailbox(let id):
             FolderView(mailboxID: id, selection: $selectedMessageID, searchText: searchText)
                 .id(id)
+        case .message(let id):
+            if let summary = store.summary(id: id) {
+                if let (chat, thread) = store.chatAndThread(containing: summary) {
+                    // A search result in a chat opens there, with its thread.
+                    Color.clear.task(id: id) {
+                        navigator.showChat(chat.id, accountID: chat.accountID, thread: thread.id)
+                    }
+                } else {
+                    MessageDetailView(summary: summary)
+                        .id(id)
+                }
+            }
         case .newMessage:
             if let draft = navigator.newMessage {
                 NewMessageView(draft: draft)
@@ -96,6 +117,7 @@ struct RootView: View {
         case .chat(let id) where store.chat(id: id) != nil: return
         case .mailbox(let id) where store.mailbox(id: id) != nil: return
         case .newMessage where navigator.newMessage.flatMap({ store.account($0.accountID) }) != nil: return
+        case .message(let id) where store.summary(id: id) != nil: return
         default: navigator.selection = navigator.accountID.flatMap(defaultSelection)
         }
     }
