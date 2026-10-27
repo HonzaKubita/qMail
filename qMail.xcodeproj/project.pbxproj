@@ -301,7 +301,7 @@
 				CODE_SIGN_ENTITLEMENTS = qMail.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -313,7 +313,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX)";
 				PRODUCT_NAME = "$(TARGET_NAME)$(QMAIL_NAME_SUFFIX)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -329,7 +329,7 @@
 				CODE_SIGN_ENTITLEMENTS = qMail.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -341,7 +341,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX)";
 				PRODUCT_NAME = "$(TARGET_NAME)$(QMAIL_NAME_SUFFIX)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -353,7 +353,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -361,7 +361,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "qMail Updater";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX).updater";
 				PRODUCT_NAME = "qMail Updater";
 				SKIP_INSTALL = YES;
@@ -373,7 +373,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5GYRSQQ6CW;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -381,7 +381,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "qMail Updater";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.honzakubita.qmail$(QMAIL_ID_SUFFIX).updater";
 				PRODUCT_NAME = "qMail Updater";
 				SKIP_INSTALL = YES;
