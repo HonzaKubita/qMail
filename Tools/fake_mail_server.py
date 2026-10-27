@@ -4,6 +4,10 @@
 Plaintext, localhost only, any password accepted. Seeds realistic mail: group threads
 with References headers, a Czech 1:1 thread, HTML with gmail_quote, an attachment,
 newsletters and notifications.
+
+    python3 Tools/fake_mail_server.py [outbox-file] [--demo]
+
+--demo seeds fictional conversations for screenshots instead (sign in as emma@example.com).
 """
 import asyncio
 import base64
@@ -211,6 +215,210 @@ def seed():
 
     put("Archive", ALICE, [ME], "Old photos", "Found these old photos from 2019!", 60 * 24 * 40, "arch1@example.com")
     put("Projects/Ko&AWE-", BOB, [ME], "Project folder test", "This lives in a nested folder with a Czech name.", 60 * 24 * 3, "p1@example.com")
+
+
+# ---------------------------------------------------------------- Demo data (--demo)
+# Fictional people and conversations for screenshots. Addresses use reserved example domains.
+
+EMMA = ("Emma Lindqvist", "emma@example.com")
+PRIYA = ("Priya Raman", "priya@example.net")
+JONAS = ("Jonas Weber", "jonas@example.org")
+MATEO = ("Mateo Alvarez", "mateo@example.com")
+SOFIA = ("Sofia Kowalska", "sofia@studio.example.com")
+DANIEL = ("Daniel Okafor", "daniel@studio.example.com")
+MEI = ("Mei Chen", "mei@studio.example.com")
+INGRID = ("Ingrid Lindqvist", "ingrid@example.net")
+AIRLINE = ("Northwind Air", "no-reply@northwind.example")
+BRIEF = ("The Morning Brief", "hello@brief.example")
+BOOKSHOP = ("Paper & Ink", "orders@paperandink.example")
+
+
+def png(width, height, pixel):
+    """Encodes an RGB image as PNG without third-party modules."""
+    import struct
+    import zlib
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        for x in range(width):
+            rows.extend(pixel(x, y))
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
+
+
+def sunset_photo(width=960, height=640):
+    """A generated sunset over the sea with rooftops in front, standing in for a holiday photo."""
+    import math
+    horizon = int(height * 0.62)
+    sun_x, sun_y, sun_r = width * 0.62, horizon - height * 0.08, height * 0.07
+
+    def mix(a, b, t):
+        t = max(0.0, min(1.0, t))
+        return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+    # Rooftops: (left, right, top) with a terracotta or cream color.
+    roofs = []
+    x, seed_value = -20, 7
+    while x < width:
+        seed_value = (seed_value * 1103515245 + 12345) % 2 ** 31
+        w = 70 + seed_value % 90
+        top = height - 90 - (seed_value >> 8) % 120
+        roofs.append((x, x + w, top, (seed_value >> 4) % 3))
+        x += w - 6
+
+    def hills(x):
+        return horizon - 18 - 22 * math.sin(x / width * 5.2 + 1.3) - 10 * math.sin(x / width * 13.0)
+
+    def pixel(x, y):
+        for left, right, top, kind in roofs:
+            if left <= x < right:
+                peak = top - (right - left) * 0.28
+                center = (left + right) / 2
+                roof_y = peak + abs(x - center) / ((right - left) / 2) * (top - peak)
+                if y >= roof_y:
+                    wall = [(176, 92, 64), (214, 190, 160), (150, 76, 58)][kind]
+                    shade = 0.55 if y < top + 6 else 0.75
+                    if y < top:
+                        return bytes(int(c * 0.6) for c in (168, 70, 48))
+                    window = (x - left) % 28 < 10 and (y - top) % 34 < 14 and y > top + 16
+                    if window:
+                        return bytes((255, 196, 110))
+                    return bytes(int(c * shade) for c in wall)
+        if y < horizon:
+            if y > hills(x) and x < width * 0.45:
+                return bytes((92, 62, 88))
+            t = y / horizon
+            color = mix((38, 52, 110), (232, 112, 92), t * 1.2) if t < 0.8 else mix((232, 112, 92), (252, 196, 120), (t - 0.8) / 0.2)
+            d = math.hypot(x - sun_x, y - sun_y)
+            if d < sun_r:
+                return bytes((255, 236, 190))
+            glow = max(0.0, 1 - (d - sun_r) / (sun_r * 4))
+            color = mix(color, (255, 214, 150), glow * 0.7)
+            return bytes(int(c) for c in color)
+        t = (y - horizon) / (height - horizon)
+        color = mix((214, 120, 108), (40, 58, 104), t * 1.6)
+        ripple = math.sin(y * 0.9 + math.sin(x * 0.05) * 2)
+        if abs(x - sun_x) < sun_r * (1.6 - t) and ripple > 0.2:
+            color = mix(color, (255, 220, 160), 0.75 - t * 0.5)
+        elif ripple > 0.85:
+            color = mix(color, (255, 255, 255), 0.08)
+        return bytes(int(c) for c in color)
+
+    return png(width, height, pixel)
+
+
+def seed_demo():
+    def put(mbox, frm, to, subject, body, minutes, msgid, seen=True, **kw):
+        raw, date = make(frm, to, subject, body, minutes, msgid, **kw)
+        add(mbox, raw, ["\\Seen"] if seen else [], date)
+
+    def box(frm):
+        return "Sent" if frm == EMMA else "INBOX"
+
+    day = 60 * 24
+    pdf = b"%PDF-1.4\n% demo document\n"
+
+    # Group chat: a trip with friends.
+    trip = [EMMA, PRIYA, JONAS, MATEO]
+
+    def to_all(frm):
+        return [p for p in trip if p != frm]
+
+    put("INBOX", PRIYA, to_all(PRIYA), "Lisbon in May?",
+        "Okay, it's happening! Who's in for a long weekend in Lisbon, 8–11 May? I'm already making a list of places to eat 🐟",
+        3 * day + 300, "l1@example.net")
+    replies = [
+        (MATEO, "In! Can we go back to that tiny place with the grilled sardines?"),
+        (JONAS, "Count me in. I'll sort out the flights tonight."),
+        (EMMA, "Yes!! I'll look for an apartment in Alfama."),
+        (PRIYA, "Perfect. Jonas, aim for the Friday morning flight if you can 🙏"),
+    ]
+    ids = ["l1@example.net"]
+    for i, (frm, text) in enumerate(replies):
+        msgid = "l1r%d@demo.example" % i
+        quoted = "%s\n\nOn Mon, 28 Apr 2026 at 18:%02d, %s <%s> wrote:\n> Who's in for a long weekend in Lisbon?" % (text, 10 + i, PRIYA[0], PRIYA[1])
+        put(box(frm), frm, to_all(frm), "Re: Lisbon in May?", quoted, 3 * day + 280 - i * 25, msgid, reply_to_ids=list(ids))
+        ids.append(msgid)
+
+    put("INBOX", MATEO, to_all(MATEO), "Throwback to last time",
+        "Found this from our last trip. Same rooftop this time? 🌅", 2 * day + 120, "l2@example.com",
+        attachment=("Rooftop.png", "image/png", sunset_photo()))
+    put("INBOX", PRIYA, to_all(PRIYA), "Re: Throwback to last time", "Yes please, that view 😍",
+        2 * day + 100, "l2r1@example.net", reply_to_ids=["l2@example.com"])
+    put("INBOX", JONAS, to_all(JONAS), "Flights booked ✈️",
+        "Booked! We land Friday at 9:40 and fly back Monday evening. Confirmation attached.",
+        day + 200, "l3@example.org", attachment=("Booking confirmation.pdf", "application/pdf", pdf))
+    put("INBOX", MATEO, to_all(MATEO), "Re: Flights booked ✈️", "Legend. I owe you a pastel de nata.",
+        day + 180, "l3r1@example.com", reply_to_ids=["l3@example.org"])
+    put("Sent", EMMA, to_all(EMMA), "Apartment shortlist",
+        "Found three places in Alfama, all with a terrace. My favourite is the second one, two minutes from the tram 28 stop.\n\nVote by Wednesday?",
+        240, "l4@example.com")
+    for i, (frm, text, minutes) in enumerate([
+        (JONAS, "Second one for me. The kitchen looks great, we could cook one night.", 150),
+        (MATEO, "Second one, no contest. That terrace! 🌿", 25),
+        (PRIYA, "+1 for number two. Booking it now?", 9),
+    ]):
+        put("INBOX", frm, to_all(frm), "Re: Apartment shortlist",
+            "%s\n\nOn Wed, Emma Lindqvist <emma@example.com> wrote:\n> Vote by Wednesday?" % text, minutes, "l4r%d@demo.example" % i,
+            seen=minutes > 60, reply_to_ids=["l4@example.com"])
+
+    # Group chat at work.
+    team = [EMMA, DANIEL, MEI, SOFIA]
+    put("INBOX", DANIEL, [p for p in team if p != DANIEL], "Q3 roadmap",
+        "Hi all, I've put the Q3 roadmap draft in the shared folder. Could you add your estimates by Friday?",
+        day + 400, "w1@studio.example.com")
+    put("INBOX", MEI, [p for p in team if p != MEI], "Re: Q3 roadmap",
+        "Done for the mobile items. The offline mode is bigger than we thought, maybe split it in two?",
+        day + 320, "w1r1@studio.example.com", reply_to_ids=["w1@studio.example.com"])
+    put("Sent", EMMA, [p for p in team if p != EMMA], "Re: Q3 roadmap",
+        "Agree with Mei. I added the design estimates too.", day + 300, "w1r2@example.com",
+        reply_to_ids=["w1@studio.example.com", "w1r1@studio.example.com"])
+
+    # Direct messages.
+    put("INBOX", SOFIA, [EMMA], "Typeface options",
+        "Narrowed the rebrand fonts down to two. I'm leaning towards the rounded one, it feels friendlier.",
+        4 * day + 200, "s0@studio.example.com")
+    put("Sent", EMMA, [SOFIA], "Re: Typeface options", "Agreed, the rounded one. It works at small sizes too.",
+        4 * day + 150, "s0r1@example.com", reply_to_ids=["s0@studio.example.com"])
+    put("INBOX", SOFIA, [EMMA], "Re: Typeface options", "Great, I'll update the style guide.",
+        4 * day + 120, "s0r2@studio.example.com", reply_to_ids=["s0@studio.example.com", "s0r1@example.com"])
+    put("Sent", EMMA, [SOFIA], "Lunch on Thursday?", "Lunch on Thursday? There's a new ramen place by the office 🍜",
+        2 * day + 300, "s2@example.com")
+    put("INBOX", SOFIA, [EMMA], "Re: Lunch on Thursday?", "Yes! 12:30?", 2 * day + 280, "s2r1@studio.example.com",
+        reply_to_ids=["s2@example.com"])
+    put("INBOX", SOFIA, [EMMA], "Homepage draft v2",
+        "Here's v2 of the homepage. I simplified the hero and moved pricing up. Thoughts?", 300, "s1@studio.example.com",
+        attachment=("Homepage v2.pdf", "application/pdf", pdf))
+    put("Sent", EMMA, [SOFIA], "Re: Homepage draft v2", "Much cleaner! Maybe a bit more contrast on the buttons?",
+        200, "s1r1@example.com", reply_to_ids=["s1@studio.example.com"])
+    put("INBOX", SOFIA, [EMMA], "Re: Homepage draft v2", "Good call. I'll send v3 tomorrow morning.",
+        110, "s1r2@studio.example.com", reply_to_ids=["s1@studio.example.com", "s1r1@example.com"])
+    put("INBOX", JONAS, [EMMA], "Climbing on Thursday?", "Climbing on Thursday after work? The new wall opened 🧗",
+        35, "j1@example.org", seen=False)
+    put("INBOX", INGRID, [EMMA], "Sunday lunch", "Are you coming on Sunday? Dad is making his fish soup.",
+        day + 60, "i1@example.net")
+    put("Sent", EMMA, [INGRID], "Re: Sunday lunch", "Wouldn't miss it ❤️ I'll bring dessert.",
+        day + 30, "i1r1@example.com", reply_to_ids=["i1@example.net"])
+    put("INBOX", DANIEL, [EMMA], "Contract for the harbour project", "The signed contract is in. Kick-off call next Tuesday at 10?",
+        2 * day + 500, "d1@studio.example.com", attachment=("Contract.pdf", "application/pdf", pdf))
+    put("Sent", EMMA, [DANIEL], "Re: Contract for the harbour project", "Great news! Tuesday works.",
+        2 * day + 480, "d1r1@example.com", reply_to_ids=["d1@studio.example.com"])
+    put("INBOX", MEI, [EMMA], "Coffee?", "Coffee at the usual place at 3?", 3 * day, "m1@studio.example.com")
+
+    # Updates: notifications and newsletters.
+    bulk = ["List-Unsubscribe: <mailto:unsubscribe@brief.example>", "Precedence: bulk"]
+    put("INBOX", AIRLINE, [EMMA], "Your trip to Lisbon is confirmed", "Booking reference K7Q2PX. Check-in opens 24 hours before departure.",
+        day + 190, "a1@northwind.example")
+    put("INBOX", BRIEF, [EMMA], "Tuesday: the week ahead", "Five things to know this morning.", day + 900, "b1@brief.example", extra_headers=bulk)
+    put("INBOX", BRIEF, [EMMA], "Wednesday: the week ahead", "Five things to know this morning.", 500, "b2@brief.example", seen=False,
+        extra_headers=bulk)
+    put("INBOX", BOOKSHOP, [EMMA], "Your order has shipped", "Your copy of The Overstory is on its way.", 2 * day,
+        "p1@paperandink.example", extra_headers=["Precedence: bulk"])
 
 
 # ---------------------------------------------------------------- IMAP
@@ -564,11 +772,16 @@ async def smtp_client(reader, writer):
         writer.close()
 
 
-OUTBOX = sys.argv[1] if len(sys.argv) > 1 else "/tmp/qmail-outbox.eml"
+DEMO = "--demo" in sys.argv[1:]
+ARGS = [a for a in sys.argv[1:] if a != "--demo"]
+OUTBOX = ARGS[0] if ARGS else "/tmp/qmail-outbox.eml"
+if DEMO:
+    ME = EMMA
+    DELIVERED = True  # no surprise message during screenshots
 
 
 async def main():
-    seed()
+    seed_demo() if DEMO else seed()
     imap = await asyncio.start_server(imap_client, "127.0.0.1", 1143)
     smtp = await asyncio.start_server(smtp_client, "127.0.0.1", 1025)
     log("Fake IMAP on 1143, SMTP on 1025")

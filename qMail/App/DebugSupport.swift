@@ -7,7 +7,10 @@ import SwiftUI
 /// Development hooks driven by environment variables (Debug builds only):
 ///   QMAIL_TEST_SERVER=1        add an account for Tools/fake_mail_server.py (IMAP 127.0.0.1:1143, SMTP :1025)
 ///   QMAIL_TEST_SERVER=2        also add a second account (work@qmail.test) on the same server
+///   QMAIL_TEST_SERVER=demo     add demo accounts for `fake_mail_server.py --demo` (for screenshots)
 ///   QMAIL_TEST_SERVER=remove   remove the test accounts again (Keychain items and cache included)
+///   QMAIL_WINDOW=1440x900      resize the main window (points)
+///   QMAIL_APPEARANCE=light|dark  force light or dark mode
 ///   QMAIL_SELECT=chat:N        preselect the Nth chat
 ///   QMAIL_SELECT=inbox:N       preselect the Nth inbox message
 ///   QMAIL_SEND=text            with chat:N, post a new thread in that chat (exercises SMTP + APPEND)
@@ -25,22 +28,26 @@ import SwiftUI
 extension MailStore {
     static let testAccountEmail = "me@qmail.test"
     static let secondTestAccountEmail = "work@qmail.test"
+    /// Demo accounts: the fake server's --demo mail is addressed to the first one.
+    static let demoAccounts = [("Emma Lindqvist", "emma@example.com"), ("Emma Lindqvist", "emma@studio.example.com")]
 
     func installTestAccountIfRequested() async {
         guard let mode = ProcessInfo.processInfo.environment["QMAIL_TEST_SERVER"] else { return }
-        let testEmails = [Self.testAccountEmail, Self.secondTestAccountEmail]
+        let testAccounts = [("Honza Test", Self.testAccountEmail), ("Honza Work", Self.secondTestAccountEmail)]
         if mode == "remove" {
-            for account in accounts where testEmails.contains(account.email) { removeAccount(account.id) }
+            let emails = (testAccounts + Self.demoAccounts).map(\.1)
+            for account in accounts where emails.contains(account.email) { removeAccount(account.id) }
             return
         }
-        for email in testEmails.prefix(mode == "2" ? 2 : 1) where !accounts.contains(where: { $0.email == email }) {
-            await addTestAccount(email: email)
+        let wanted = mode == "demo" ? Self.demoAccounts : Array(testAccounts.prefix(mode == "2" ? 2 : 1))
+        for (name, email) in wanted where !accounts.contains(where: { $0.email == email }) {
+            await addTestAccount(name: name, email: email)
         }
     }
 
-    private func addTestAccount(email: String) async {
+    private func addTestAccount(name: String, email: String) async {
         let account = Account(
-            displayName: email == Self.testAccountEmail ? "Honza Test" : "Honza Work", email: email, provider: .other,
+            displayName: name, email: email, provider: .other,
             imap: ServerEndpoint(host: "127.0.0.1", port: 1143, security: .none),
             smtp: ServerEndpoint(host: "127.0.0.1", port: 1025, security: .none),
             username: email, authKind: .password, saveSentCopy: true
@@ -48,6 +55,8 @@ extension MailStore {
         do {
             try await verify(account, secret: .password("test"))
             try await addAccount(account, secret: .password("test"))
+            if email == Self.demoAccounts[0].1 { setAppearance(of: account.id, tint: AccountTint.blue.rawValue, symbol: "person.fill") }
+            if email == Self.demoAccounts[1].1 { setAppearance(of: account.id, tint: AccountTint.orange.rawValue, symbol: "briefcase.fill") }
         } catch {
             errorMessage = "Test server: \(error.localizedDescription)"
         }
@@ -96,6 +105,23 @@ private func snapshotIfRequested(_ store: MailStore) async {
     }
 }
 
+@MainActor
+private func applyWindowOverrides() async {
+    let environment = ProcessInfo.processInfo.environment
+    switch environment["QMAIL_APPEARANCE"] {
+    case "light": NSApp.appearance = NSAppearance(named: .aqua)
+    case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+    default: break
+    }
+    guard let size = environment["QMAIL_WINDOW"]?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 else { return }
+    try? await Task.sleep(for: .milliseconds(300))
+    guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }) else { return }
+    var frame = window.frame
+    frame.origin.y += frame.height - size[1]
+    frame.size = CGSize(width: size[0], height: size[1])
+    window.setFrame(frame, display: true)
+}
+
 struct DebugSelection: ViewModifier {
     @Environment(MailStore.self) private var store
     @Environment(AppNavigator.self) private var navigator
@@ -106,6 +132,7 @@ struct DebugSelection: ViewModifier {
     func body(content: Content) -> some View {
         content
             .task { await snapshotIfRequested(store) }
+            .task { await applyWindowOverrides() }
             .task { await runMailAuditIfRequested(store) }
             .task {
             guard let spec = ProcessInfo.processInfo.environment["QMAIL_SELECT"] else { return }

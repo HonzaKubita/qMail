@@ -1,54 +1,147 @@
-# qMail
+<p align="center">
+  <img src="qMail/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" width="128" alt="qMail icon">
+</p>
 
-A simple, native macOS mail client built with SwiftUI and Liquid Glass. It works with Gmail, Outlook, iCloud, Yahoo, Fastmail, AOL and any IMAP/SMTP server. It's organized like Slack. Each account is a workspace, and every email lives in a chat. An email and its replies form a thread. Once someone replies to everyone on an email, the conversation becomes a group chat for exactly those people.
+<h1 align="center">qMail</h1>
+
+<p align="center">
+  Email that reads like a chat.<br>
+  A native macOS mail client that turns your inbox into Slack-style conversations, built with SwiftUI and Liquid Glass.
+</p>
+
+<p align="center">
+  <img src="docs/chat-light.png" width="49%" alt="A group chat in qMail in light mode">
+  <img src="docs/chat-dark.png" width="49%" alt="The same group chat in dark mode">
+</p>
 
 ## Features
 
-- **Workspaces.** Each account appears in a rail on the left, with an unread badge. Accounts never mix. Right-click an account (or open Settings ▸ Accounts) to change its color and icon, and press ⌘1–⌘9 to switch between accounts.
-- **Chats.** The sidebar lists *Starred*, *Group chats*, *Direct messages* and *Updates* (newsletters and notifications). Mail you send only to yourself goes to your own "(you)" chat.
-- **Threads.** In a chat, each email conversation is one message. Its replies collapse into "3 replies · Last reply 2 hours ago", which opens the thread in a panel on the right. Quoted text, "On … wrote:" headers (English, Czech, German, French, Spanish and more), signatures and mobile footers are stripped, so messages read cleanly.
-- **Slack-style timeline.** Avatars, names, date dividers, a red "New" line at the first unread message, and a Liquid Glass hover toolbar (reply in thread, view email, flag, more).
-- **Group chats need a group reply.** A one-off email to several people stays in the 1:1 chat with its sender, labelled "Sent to you, Bob & Carol". If you sent it, it appears in the chat with each recipient. A thread moves into a group chat only once someone replies to everyone.
-- **No compose windows.** *New message* replaces the conversation view with a To: field. If you already have a chat with those people, its history shows below and your message joins it. Replying always happens in the bottom bar of the chat or thread. In a 1:1 chat, when the email also went to other people, the thread's bar offers **Reply to: Alice only / Everyone**; replying to everyone turns it into a group chat. Reply, Reply All and Forward from folders and from the full email open the same bottom bar or New Message view.
-- **Composer.** Writing in a chat starts a new email thread to everyone in it. Unless you add a separate subject (**Aa**), the first line becomes the subject. That line is highlighted in the text, and a **SUBJECT** badge previews it. Writing in a thread sends a proper reply (`Re:`, `In-Reply-To`, `References`), so other people just see normal email. Return sends; Shift-Return adds a line.
-- **Folders.** Inbox, Sent, Archive, Trash and your own folders are still available, collapsed at the bottom of the sidebar, with a classic message list and reader.
-- **Push.** IMAP IDLE delivers new mail within seconds, with a periodic refresh as fallback.
-- **Search.** qMail downloads the text of every email (not attachments) in the background into a local full-text index, so the search field covers your whole mailbox: chats whose messages match, plus a list of matching emails. It ignores case and accents. Progress and disk use are in Settings ▸ General; you can turn it off there. Folders also offer "Search on Server" (Gmail's own search syntax on Gmail).
-- **Private by default.** HTML mail is rendered with JavaScript disabled and remote images blocked until you choose to load them. Passwords and tokens are stored in the Keychain.
-- **Native.** SwiftUI, Liquid Glass (glass toolbars, filter chips, composer, buttons), sandboxed, dark and light mode.
-- **No dependencies.** IMAP, SMTP (with STARTTLS), MIME, OAuth 2 (PKCE) and threading are implemented in the local `MailCore` Swift package.
+qMail is organized like Slack. Each account is a workspace, and every email lives in a chat with the people on it. An email and its replies form a thread. Once someone replies to everyone on an email, the conversation becomes a group chat for exactly those people.
+
+- **Chats instead of an inbox.** The sidebar lists *Starred*, *Group chats*, *Direct messages* and *Updates* (newsletters and notifications). Mail you send only to yourself goes to your own "(you)" chat.
+- **Threads.** In a direct message, each email conversation is one message, and its replies collapse into a card like "2 replies · Sofia: Good call…". Click it to open the thread beside the chat.
+- **Clean messages.** Quoted text, "On … wrote:" headers (in English, Czech, German, French, Spanish and more), signatures and mobile footers are stripped. Photos show inline; signature logos and tracking pixels don't.
+- **Reply in place.** There are no compose windows. Type at the bottom of a chat to start a new email to everyone in it (the first line becomes the subject), or in a thread to reply. Other people just see normal email, with proper `Re:`, `In-Reply-To` and `References` headers.
+- **Search everything.** qMail downloads the text of every email in the background into a local full-text index. Search covers your whole mailbox, not just recent mail, and ignores case and accents.
+- **Workspaces.** Switch accounts in the rail on the left or with <kbd>⌘1</kbd>–<kbd>⌘9</kbd>. Give each account its own color and icon, and hover over an icon to see which address it is.
+- **Push.** New mail arrives within seconds over IMAP IDLE.
+- **Folders when you need them.** Inbox, Sent, Archive and your own folders are still there, with a classic message list and reader.
+- **Private by default.** HTML mail is rendered with JavaScript off and remote images blocked until you load them. Passwords and tokens are kept in the Keychain, and the app is sandboxed.
+- **No dependencies.** IMAP, SMTP, MIME, OAuth 2 and threading are implemented from scratch in the local `MailCore` Swift package.
+
+<p align="center">
+  <img src="docs/thread.png" width="80%" alt="A direct message with a thread open beside it">
+</p>
+
+<p align="center">
+  <img src="docs/search.png" width="49%" alt="Searching for “terrace” finds the chat and the matching emails">
+  <img src="docs/settings.png" width="43%" alt="Account settings with a color and icon picker">
+</p>
 
 ## Requirements
 
-- macOS 26 or later (Liquid Glass)
-- Xcode 26 or later
+- macOS 26 Tahoe or later
+- Xcode 26 or later to build
 
-## Build and run
+## Install
+
+Download **qMail-x.y.dmg** from the [latest release](https://github.com/HonzaKubita/qMail/releases/latest), open it and drag **qMail** to Applications. The app is signed with Developer ID and notarized by Apple.
+
+Or build it from source:
 
 ```bash
 open qMail.xcodeproj
 ```
 
-Press ⌘R. The project is set to automatic signing with team `5GYRSQQ6CW`; change it under *Signing & Capabilities* if needed.
-
-From the command line:
-
-```bash
-xcodebuild -project qMail.xcodeproj -scheme qMail -configuration Release -derivedDataPath build/DerivedData build
-open build/DerivedData/Build/Products/Release/qMail.app
-```
+and press <kbd>⌘R</kbd>. The project uses automatic signing with team `5GYRSQQ6CW`; change it under *Signing & Capabilities* if needed.
 
 ## Adding accounts
 
 | Provider | How to sign in |
 | --- | --- |
-| Gmail | **Sign in with Google** in a secure browser window. An [app password](https://myaccount.google.com/apppasswords) still works via "Use an App Password Instead". |
-| Outlook / Hotmail / Microsoft 365 | **Sign in with Microsoft** only. Outlook's IMAP server no longer accepts passwords (`LOGINDISABLED`, `AUTH=XOAUTH2` only). |
-| iCloud | An app-specific password from [account.apple.com](https://account.apple.com) → Sign-In and Security. |
-| Yahoo / AOL / Fastmail | An app password from your account security settings. |
-| Other | Email and password. Server settings are looked up automatically in Mozilla's ISP database, or you can enter them yourself. |
+| Gmail | **Sign in with Google** in a secure browser window. An [app password](https://myaccount.google.com/apppasswords) also works, via "Use an App Password Instead". |
+| iCloud | An app-specific password from [account.apple.com](https://account.apple.com) › Sign-In and Security. |
+| Yahoo, AOL, Fastmail | An app password from your account's security settings. |
+| Any other provider | Your email and password. Server settings are looked up in Mozilla's ISP database, or you can enter them yourself. |
+| Outlook, Hotmail, Microsoft 365 | Not available yet. Outlook's IMAP server only accepts **Sign in with Microsoft**, and qMail doesn't have a Microsoft OAuth client registered yet (see [OAuth clients](#oauth-clients)). |
 
-## OAuth clients (for developers)
+## How it works
+
+| | |
+|---|---|
+| Building chats | Messages from Inbox, Sent and Archive (or Gmail's All Mail) are deduplicated by Message-ID and grouped into threads with union-find over `Message-ID`, `In-Reply-To`, `References` and Gmail's `X-GM-THRID`. |
+| Who's in a chat | Everyone in From, To and Cc except you. Your aliases are learned from what you send. |
+| Group chats | A thread joins the group chat for everyone involved once a reply goes to two or more people. Until then, each email stays in the direct message with its sender, or with each recipient if you sent it. |
+| Updates | Threads made only of automated mail (`List-Id`, `List-Unsubscribe`, `Precedence: bulk`, no-reply senders) go to *Updates*, unless you've written in them. |
+| Search | A SQLite FTS5 index per account, with diacritics removed. It stores each message's own text, up to its first 100 KB, from Gmail's All Mail or every folder except Junk, Trash and Drafts. Progress and disk use are in Settings › General, where you can also turn it off. |
+| Sync | Each folder keeps its newest 250 messages locally (configurable); *Load Older Messages* and *Search on Server* reach the rest. IMAP IDLE pushes new mail, with a periodic refresh as a fallback. |
+| Networking | `URLSessionStreamTask` with TLS and STARTTLS. IMAP with IDLE, MOVE, UIDPLUS and Gmail extensions; SMTP with PLAIN, LOGIN and XOAUTH2. |
+| Sign-in | OAuth 2 with PKCE in an `ASWebAuthenticationSession`. Tokens and passwords are stored in the Keychain. |
+
+## Development
+
+```bash
+cd MailCore && swift test      # unit tests
+swift run MailProbe            # checks TLS/STARTTLS and capabilities of every built-in provider (no login)
+```
+
+```
+qMail/                  SwiftUI app
+  App/                  App entry point, commands, debug hooks (Debug builds only)
+  Store/                MailStore (sync, actions, chats), search index, Keychain, cache, settings
+  Views/                Sidebar, chats, threads, message list, reader, compose, settings
+MailCore/               Swift package with no app or UI code
+  Transport/            TLS and STARTTLS connection
+  IMAP/                 Response parser and client
+  SMTP/                 Submission client
+  MIME/                 Header and body parsing, encodings, HTML to text, message builder
+  Auth/                 OAuth 2 + PKCE, ISP autodiscovery
+  Chats/                ChatBuilder, QuoteStripper
+Tools/fake_mail_server.py   Local IMAP/SMTP server with sample conversations
+```
+
+The Xcode project uses folder-synchronized groups, so new files under `qMail/` are picked up without editing the project.
+
+### Testing against a fake server
+
+To exercise the whole app without touching your real accounts, build a separate dev copy. It has its own bundle ID, so it gets its own sandbox container and Keychain items. Then run the fake server and point the dev copy at it:
+
+```bash
+xcodebuild -project qMail.xcodeproj -scheme qMail -configuration Debug -derivedDataPath build/DevDerivedData \
+  PRODUCT_BUNDLE_IDENTIFIER=com.honzakubita.qmail.dev2 PRODUCT_NAME=qMailDev \
+  CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Apple Development" DEVELOPMENT_TEAM=5GYRSQQ6CW build
+python3 Tools/fake_mail_server.py
+QMAIL_TEST_SERVER=2 QMAIL_SELECT=chat:0 build/DevDerivedData/Build/Products/Debug/qMailDev.app/Contents/MacOS/qMailDev
+QMAIL_FAKE_SERVER=1 swift test --package-path MailCore     # IMAP/SMTP integration tests
+QMAIL_TEST_SERVER=remove build/DevDerivedData/Build/Products/Debug/qMailDev.app/Contents/MacOS/qMailDev   # remove the test accounts
+```
+
+Sign the dev copy with your development certificate, as above. An ad-hoc signature changes with every build, which makes macOS ask for Keychain and app-data access each time.
+
+The screenshots in this README come from `python3 Tools/fake_mail_server.py --demo`, which serves fictional conversations instead, with `QMAIL_TEST_SERVER=demo QMAIL_WINDOW=1440x900 QMAIL_APPEARANCE=light QMAIL_SELECT=chat:0`. Other Debug-only hooks are documented in [`qMail/App/DebugSupport.swift`](qMail/App/DebugSupport.swift).
+
+### Releasing
+
+Bump `MARKETING_VERSION` (and `CURRENT_PROJECT_VERSION`) first. Release builds are signed for Ceska IT Akademie, z.s. (`HKN7A63ZT3`) with Developer ID. Xcode manages the certificate and provisioning with the Apple ID signed into it, so no passwords are needed:
+
+```bash
+xcodebuild -project qMail.xcodeproj -scheme qMail -configuration Release -destination 'generic/platform=macOS' \
+  -archivePath build/release/qMail.xcarchive -allowProvisioningUpdates DEVELOPMENT_TEAM=HKN7A63ZT3 archive
+# ExportOptions.plist: method developer-id, destination upload, signingStyle automatic, teamID HKN7A63ZT3
+xcodebuild -exportArchive -archivePath build/release/qMail.xcarchive -exportOptionsPlist ExportOptions.plist \
+  -exportPath build/release/export -allowProvisioningUpdates     # uploads to Apple's notary service
+xcodebuild -exportNotarizedApp -archivePath build/release/qMail.xcarchive -exportPath build/release/notarized
+```
+
+The last command fails with "not ready for distribution" until Apple finishes notarizing, which usually takes a few minutes; run it again until it succeeds. It writes the notarized app with its ticket stapled. Then package it:
+
+```bash
+mkdir build/release/dmg && ditto build/release/notarized/qMail.app build/release/dmg/qMail.app
+ln -s /Applications build/release/dmg/Applications
+hdiutil create -volname qMail -srcfolder build/release/dmg -format UDZO build/release/qMail-<version>.dmg
+```
+
+## OAuth clients
 
 "Sign in with Google" and "Sign in with Microsoft" use OAuth clients that are registered for qMail and built into the app in [`qMail/Store/OAuthClients.swift`](qMail/Store/OAuthClients.swift). Native apps are public clients, so these IDs are not secrets. If an ID is empty, that sign-in button is disabled.
 
@@ -70,56 +163,8 @@ If a Google sign-in expires (Google limits refresh tokens to 7 days while the ap
 3. **API permissions**: add the delegated permissions `IMAP.AccessAsUser.All` and `SMTP.Send` (Office 365 Exchange Online), plus `offline_access`, `openid`, `email` and `profile`.
 4. Put the Application (client) ID into `OAuthClients.microsoftClientID`.
 
-## How Chats are built
-
-1. Messages from Inbox, Sent and Archive/All Mail are deduplicated by Message-ID.
-2. They're grouped into threads with union-find over `Message-ID`, `In-Reply-To`, `References` and Gmail's `X-GM-THRID`. Replies to a parent you don't have still end up together.
-3. Each thread's participants are everyone in From/To/Cc except you. Your aliases are learned from what you send.
-4. A thread with at least one reply sent to two or more people (a "group reply") goes to the group chat for everyone involved. Otherwise each message goes to the 1:1 chat with its sender, or, for mail you sent, with each recipient. Chats are always per account. Inside a chat, each thread is one message placed where it started, and its replies open in the thread panel. Threads made only of automated mail (List-Id, List-Unsubscribe, Precedence: bulk, no-reply senders) are skipped unless you've replied in them. This can be changed in Settings.
-
-Automated threads (List-Id, List-Unsubscribe, Precedence: bulk, no-reply senders) become chats under *Updates* unless you've written in them.
-
-## Project layout
-
-```
-qMail/                  SwiftUI app
-  App/                  App entry point, commands, debug hooks (Debug builds only)
-  Store/                MailStore (sync, actions, chats), Keychain, cache, settings
-  Views/                Sidebar, message list, reader, chats, compose, settings
-MailCore/               Swift package with no app or UI code
-  Transport/            URLSessionStreamTask connection (TLS and STARTTLS)
-  IMAP/                 Response parser, client (IDLE, MOVE, UIDPLUS, Gmail extensions)
-  SMTP/                 Submission client (PLAIN, LOGIN, XOAUTH2)
-  MIME/                 Header/body parsing, encodings, HTML→text, message builder
-  Auth/                 OAuth 2 + PKCE, ISP autodiscovery
-  Chats/                ChatBuilder, QuoteStripper
-  Tests/                Unit tests plus opt-in integration tests
-Tools/fake_mail_server.py   Local IMAP/SMTP server with sample conversations
-```
-
-## Testing
-
-```bash
-cd MailCore && swift test              # unit tests
-swift run MailProbe                    # TLS/STARTTLS + capabilities of every built-in provider (no login)
-```
-
-To exercise the whole app without touching your real accounts, build a separate dev copy (its own bundle ID, so its own sandbox container and Keychain items), run the fake server and point the dev copy at it:
-
-```bash
-xcodebuild -project qMail.xcodeproj -scheme qMail -configuration Debug -derivedDataPath build/DevDerivedData \
-  PRODUCT_BUNDLE_IDENTIFIER=com.honzakubita.qmail.dev2 PRODUCT_NAME=qMailDev \
-  CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Apple Development" DEVELOPMENT_TEAM=5GYRSQQ6CW build
-python3 Tools/fake_mail_server.py
-QMAIL_TEST_SERVER=2 QMAIL_SELECT=chat:0 build/DevDerivedData/Build/Products/Debug/qMailDev.app/Contents/MacOS/qMailDev
-QMAIL_FAKE_SERVER=1 swift test --package-path MailCore     # IMAP/SMTP integration tests
-QMAIL_TEST_SERVER=remove build/DevDerivedData/Build/Products/Debug/qMailDev.app/Contents/MacOS/qMailDev   # remove the test accounts
-```
-
-Sign the dev copy with your development certificate, as above. An ad-hoc signature changes with every build, which makes macOS ask for Keychain and app-data access each time. Other Debug-only hooks (`QMAIL_SELECT`, `QMAIL_SEND`, `QMAIL_REPLY`, `QMAIL_OPEN_THREAD`, `QMAIL_SNAPSHOT`) are documented in `qMail/App/DebugSupport.swift`.
-
 ## Limitations
 
-- Each folder keeps the newest 250 messages locally by default (configurable). "Load Older Messages" and "Search on Server" reach the rest. The search index is separate: a SQLite FTS5 database per account (Gmail's All Mail, or every folder except Junk, Trash and Drafts elsewhere) that stores each message's own text, up to its first 100 KB.
+- Outlook and other Microsoft accounts can't be added until a Microsoft OAuth client is registered.
 - Composing is plain text, with attachments. Drafts are not synced to the server.
 - Sending needs a connection; there is no offline outbox yet.
