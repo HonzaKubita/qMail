@@ -23,6 +23,7 @@ import SwiftUI
 ///   QMAIL_SELECT=setup|settings[:accounts]  show the add-account sheet or the Settings window
 ///   QMAIL_RESYNC=N             get new mail again N seconds after launch
 ///   QMAIL_SEARCH=text          type text into the search field
+///   QMAIL_KEY=f                after a few seconds, press ⌘ and that key (e.g. ⌘F to search); `all` lists the menus
 ///   QMAIL_HOVER_ACCOUNT=N      show the Nth account's hover label in the rail
 ///   QMAIL_UPDATE_FEED=url      check this release JSON for updates (Debug builds don't check otherwise)
 ///   QMAIL_UPDATE_INSTALL=1     with QMAIL_UPDATE_FEED, install the update it finds right away
@@ -161,6 +162,40 @@ private func applyWindowOverrides() async {
     window.setFrame(frame, display: true)
 }
 
+/// QMAIL_KEY=f: sends ⌘F through the main menu and then the window, as if typed, to check a shortcut.
+@MainActor
+private func pressShortcutIfRequested() async {
+    guard let key = ProcessInfo.processInfo.environment["QMAIL_KEY"] else { return }
+    try? await Task.sleep(for: .seconds(4))
+    guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
+          let event = NSEvent.keyEvent(
+              with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+              windowNumber: window.windowNumber, context: nil, characters: key, charactersIgnoringModifiers: key,
+              isARepeat: false, keyCode: 0
+          ) else { return }
+    func items(_ menu: NSMenu?, _ path: String) -> [String] {
+        (menu?.items ?? []).flatMap { item in
+            let here = path + " > " + item.title
+            let own = item.keyEquivalent == key || key == "all" ? ["\(here) [\(item.keyEquivalentModifierMask.rawValue)] enabled=\(item.isEnabled)"] : []
+            return own + items(item.submenu, here)
+        }
+    }
+    FileHandle.standardError.write(Data("QMAIL_KEY items: \(items(NSApp.mainMenu, ""))\n".utf8))
+    // Shortcuts on views (not menu items) are handled by the window instead.
+    let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) == true ? "menu"
+        : window.performKeyEquivalent(with: event) ? "window" : "nothing"
+    try? await Task.sleep(for: .seconds(1))
+    // Names the focused view and the views it sits in, e.g. a search field's editor inside the toolbar.
+    var chain: [String] = []
+    var view = window.firstResponder as? NSView
+    while let current = view, chain.count < 6 {
+        chain.append(String(describing: type(of: current)))
+        view = current.superview
+    }
+    let responder = chain.isEmpty ? window.firstResponder.map { String(describing: type(of: $0)) } ?? "none" : chain.joined(separator: " < ")
+    FileHandle.standardError.write(Data("QMAIL_KEY ⌘\(key) handled by \(handled), focus: \(responder)\n".utf8))
+}
+
 struct DebugSelection: ViewModifier {
     @Environment(MailStore.self) private var store
     @Environment(AppNavigator.self) private var navigator
@@ -172,6 +207,7 @@ struct DebugSelection: ViewModifier {
         content
             .task { await snapshotIfRequested(store) }
             .task { await applyWindowOverrides() }
+            .task { await pressShortcutIfRequested() }
             .task { await runMailAuditIfRequested(store) }
             .task {
             guard let spec = ProcessInfo.processInfo.environment["QMAIL_SELECT"] else { return }

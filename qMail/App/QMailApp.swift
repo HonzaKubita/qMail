@@ -65,15 +65,10 @@ struct MailCommands: Commands {
                 navigator.startNewMessage(accountID: navigator.accountID ?? store.accounts.first?.id)
             }
             .keyboardShortcut("n")
-            .disabled(store.accounts.isEmpty)
         }
-        CommandGroup(after: .sidebar) {
-            Divider()
-            // ⌘1…⌘9 switch accounts, like tabs.
-            ForEach(Array(store.accounts.prefix(9).enumerated()), id: \.element.id) { index, account in
-                Button(account.email) { navigator.accountID = account.id }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-            }
+        CommandGroup(after: .textEditing) {
+            Button("Search") { navigator.searchRequest += 1 }
+                .keyboardShortcut("f")
         }
         CommandMenu("Mailbox") {
             Button("Get New Mail") {

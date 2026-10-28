@@ -61,6 +61,7 @@ struct RootView: View {
             // Back in the search field: show the results for what's still in it.
             if focused { showingSearchResults = searchShowsResults }
         }
+        .onChange(of: navigator.searchRequest) { searchFocused = true }
         .onChange(of: navigator.selection) {
             selectedMessageID = nil
             showingSearchResults = false

@@ -38,6 +38,8 @@ final class AppNavigator {
     var pendingThread: (chatID: String, threadID: String, replyAll: Bool)?
     /// The account Settings should show when it opens from an account's menu.
     var settingsAccountID: UUID?
+    /// Bumped by Edit ▸ Search (⌘F) to put the cursor in the toolbar's search field.
+    var searchRequest = 0
 
     func showChat(_ chatID: String, accountID: UUID, thread threadID: String? = nil, replyAll: Bool = false) {
         self.accountID = accountID

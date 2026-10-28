@@ -64,7 +64,7 @@ private struct AccountRail: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(store.accounts) { account in
+            ForEach(Array(store.accounts.enumerated()), id: \.element.id) { index, account in
                 let isSelected = account.id == accountID
                 Button {
                     accountID = account.id
@@ -76,6 +76,8 @@ private struct AccountRail: View {
                         }
                 }
                 .buttonStyle(RailButtonStyle(isSelected: isSelected))
+                // ⌘1…⌘9 switch accounts, like tabs. (Here rather than in a menu, which doesn't update as accounts load.)
+                .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command) : nil)
                 // Shown at once on hover (a tooltip takes a second), so same-looking accounts are easy to tell apart.
                 .onHover { inside in
                     if inside { hovered = account.id } else if hovered == account.id { hovered = nil }
