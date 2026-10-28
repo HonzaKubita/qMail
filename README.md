@@ -101,6 +101,7 @@ MailCore/               Swift package with no app or UI code
   Chats/                ChatBuilder, QuoteStripper
 qMailUpdater/           Helper app that swaps in a downloaded update (qMail itself is sandboxed)
 Tools/fake_mail_server.py   Local IMAP/SMTP server with sample conversations
+Tools/dmg/                  Release disk image: layout, background and make-dmg.sh
 ```
 
 The Xcode project uses folder-synchronized groups, so new files under `qMail/` are picked up without editing the project.
@@ -139,11 +140,11 @@ xcodebuild -exportNotarizedApp -archivePath build/release/qMail.xcarchive -expor
 The last command fails with "not ready for distribution" until Apple finishes notarizing, which usually takes a few minutes; run it again until it succeeds. It writes the notarized app with its ticket stapled. Then package it, as a disk image for new installs and a zip for the in-app updater:
 
 ```bash
-mkdir build/release/dmg && ditto build/release/notarized/qMail.app build/release/dmg/qMail.app
-ln -s /Applications build/release/dmg/Applications
-hdiutil create -volname qMail -srcfolder build/release/dmg -format UDZO build/release/qMail-<version>.dmg
+Tools/dmg/make-dmg.sh build/release/notarized/qMail.app build/release/qMail-<version>.dmg
 ditto -c -k --keepParent build/release/notarized/qMail.app build/release/qMail-<version>.zip
 ```
+
+The disk image opens to a window with qMail, an arrow and the Applications folder. Its layout is in [`Tools/dmg/settings.py`](Tools/dmg/settings.py), applied by [dmgbuild](https://github.com/dmgbuild/dmgbuild) (installed into `build/dmg-venv` the first time), and its background is drawn by `swift Tools/dmg/make-background.swift`.
 
 Publish a GitHub release tagged `v<version>` with both files; its notes are what the update window shows. qMail looks at `releases/latest`, downloads the `qMail-<version>.zip` asset and installs it only if the app inside is `com.honzakubita.qmail` at that version, signed by the same team as the running copy.
 
